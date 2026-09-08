@@ -61,6 +61,22 @@ pub const EXTERNOS: &[AppExterno] = &[
 // dentro. Anunciar aqui o que talvez nunca exista seria prometer pela tabela o que a decisão
 // se recusou a prometer. Entram quando forem repositório com release, não antes.
 
+/// **O quê:** o nome que este binário TEVE antes, se ele foi renomeado. Uma fonte só —
+/// [`crate::atualizar::APPS_GERIDOS`].
+///
+/// **Onde:** [`descobrir_app`], como segunda tentativa.
+///
+/// **Por que existe, e por que consulta a tabela em vez de repetir a lista:** o Deployer se
+/// chamou `deployer` até o commit `0fa0112`. O `atualizar` já reconhecia o nome velho — mas o
+/// `descobrir_app`, que é quem o `list` e a GUI usam, não. O resultado, medido nesta máquina:
+/// `schematize-market list` dizia **"não instalado"** sobre um deployer 0.5.0 que estava lá.
+///
+/// A lição não é "faltou um lugar": é que a correção tinha sido PONTUAL onde precisava ser da
+/// TABELA. Repetir a lista aqui recriaria exatamente a divergência que o bug original é.
+fn nome_legado(bin: &str) -> Option<&'static str> {
+    crate::atualizar::APPS_GERIDOS.iter().find(|a| a.bin == bin).and_then(|a| a.legado)
+}
+
 /// **O quê:** acha um app externo pelo nome do binário.
 /// **Onde:** a CLI, ao despachar `schematize <app> …`.
 pub fn externo(bin: &str) -> Option<&'static AppExterno> {
@@ -103,7 +119,7 @@ impl Estado {
 /// fallback. Sem isso, o app aberto pelo lançador do desktop (que dá PATH mínimo) diria
 /// "não instalado" sobre um Deployer que está em `~/.cargo/bin`.
 pub fn descobrir_app(bin: &str) -> Estado {
-    let Some(caminho) = resolve_bin(bin) else {
+    let Some(caminho) = resolve_bin(bin).or_else(|| nome_legado(bin).and_then(resolve_bin)) else {
         return Estado::Ausente;
     };
     match crate::util::run(&caminho.to_string_lossy(), &["--version"]) {
@@ -229,6 +245,22 @@ mod tests {
                     n + 1
                 );
             }
+        }
+    }
+
+    /// **O nome LEGADO é reconhecido também por aqui** — não só pelo `atualizar`.
+    ///
+    /// O `descobrir_app` alimenta o `market list` e a aba do Mercado na GUI. Enquanto ele
+    /// ignorava o nome velho, as duas afirmavam "não instalado" sobre um deployer que estava
+    /// na máquina — e essa é a resposta que manda a pessoa instalar o que já tem.
+    #[test]
+    fn descobrir_app_conhece_o_nome_legado() {
+        assert_eq!(nome_legado("schematize-deployer"), Some("deployer"));
+        assert_eq!(nome_legado("schematize-optimizer"), None);
+        assert_eq!(nome_legado("nao-existe"), None);
+        // E a fonte é a tabela, não uma lista repetida aqui: se o `legado` mudar lá, muda aqui.
+        for a in crate::atualizar::APPS_GERIDOS {
+            assert_eq!(nome_legado(a.bin), a.legado, "{} fora de sincronia com a tabela", a.bin);
         }
     }
 
