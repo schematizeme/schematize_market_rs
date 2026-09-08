@@ -62,6 +62,38 @@ pub(crate) enum Cmd {
         #[arg(long, short = 'y')]
         yes: bool,
     },
+    /// Update everything installed from the ecosystem (app, GUI, apps, and this program).
+    ///
+    /// This is the successor of `schematize-updater` (ADR-0013): the market is now the single
+    /// owner of installing AND updating. Prebuilt binary when there is one for this platform,
+    /// building from source otherwise.
+    Update {
+        /// Reinstall even when already at the target version.
+        #[arg(long)]
+        force: bool,
+        /// Show the plan and change nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Pin the app to a version, so `update` stops moving it. `latest` unpins.
+    Pin {
+        /// A version such as 0.57.0 (the `v` of a tag is accepted), or `latest` to unpin.
+        version: String,
+    },
+    /// Stop following a pinned version — same as `pin latest`.
+    Unpin,
+    /// Versions, platform, pin, and which components are installed.
+    Status {
+        /// Machine-readable output with STABLE keys — never translated.
+        ///
+        /// The human table goes through the i18n catalog, so its labels change with the
+        /// locale. Anything that PARSES this command must use this flag: reading the human
+        /// table works in one language and silently returns nothing in the other nineteen.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Launch the installed GUI by absolute path (does not depend on the desktop PATH).
+    Run,
     /// Icon and application-menu entry — so the app opens without the hub.
     Desktop {
         #[arg(long)]

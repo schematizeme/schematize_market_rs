@@ -28,6 +28,11 @@ fn main() {
         Cmd::Switch { lang, to, dry_run, yes } => {
             market::environments::switch(&lang, &to, dry_run, yes)
         }
+        Cmd::Update { force, dry_run } => cli::atualizar::update_cmd(force, dry_run),
+        Cmd::Pin { version } => cli::atualizar::pin_cmd(&version),
+        Cmd::Unpin => cli::atualizar::unpin_cmd(),
+        Cmd::Status { json } => cli::atualizar::status_cmd(json),
+        Cmd::Run => cli::atualizar::run_cmd(),
         Cmd::Desktop { install, remove } => cli::lista::desktop_cmd(install, remove),
     };
     if let Err(e) = r {

@@ -1,8 +1,14 @@
 [package]
 name = "schematize-market"
-version = "0.1.0"
+# 0.2.0 — o market absorveu o `schematize_updater_rs` (ADR-0013) e passou a ser o dono de
+# INSTALAR e ATUALIZAR: +2.085 linhas portadas e cinco comandos novos (`update`, `pin`,
+# `unpin`, `status`, `run`). Menor, e nao patch, porque a superficie publica cresceu.
+#
+# O `main` carrega a versao a frente da tag, como no resto da casa (o CLI esta em 0.62.0 com
+# v0.55.7 publicado). Cortar a tag e chamada humana — ver o BLOCKED do overdev.
+version = "0.2.0"
 edition = "2021"
-description = "schematize market: instala e remove programas — linguagens (docker|mise|distro|official), ferramentas de dev e os apps do ecossistema."
+description = "schematize market: instala e ATUALIZA — linguagens (docker|mise|distro|official), ferramentas de dev, os apps do ecossistema, o app e ele mesmo."
 license = "MIT"
 
 [lib]

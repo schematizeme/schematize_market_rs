@@ -181,6 +181,93 @@ pub fn run_shell(cmd: &str) -> Result<(), String> {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// EXECUÇÃO DE PROCESSOS PARA O CAMINHO DE ATUALIZAÇÃO
+//
+// Vieram do `sh.rs` do `schematize_updater_rs` (ADR-0013): o updater orquestra
+// ferramentas do sistema — curl, rustup, cargo, git, gerenciador de pacotes — em vez de
+// embutir libs. Este é o ÚNICO módulo do updater que já tinha equivalente aqui (`run`,
+// `run_shell`), então ele funde em vez de virar arquivo novo: duas funções de "rodar
+// comando" no mesmo crate seriam a divergência esperando acontecer.
+//
+// A diferença entre as três formas é o que se faz com a saída, e ela importa:
+// - [`run`]          captura stdout, devolve `Result` — o erro traz o stderr.
+// - [`capture`]      captura stdout, devolve `Option` — falha é "não sei", não erro.
+// - [`run_inherit`]  NÃO captura: o usuário VÊ o build e o `sudo`/`rustup` pode pedir senha.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// **O quê:** captura o stdout de `cmd args`, já com `trim`. `None` se o comando não
+/// existir ou sair diferente de zero. stderr é descartado.
+///
+/// **Onde:** as checagens do caminho de atualização — `<bin> --version`, `pkg-config
+/// --exists`, `id -u` — onde a falha significa "não sei" e não "deu erro".
+///
+/// **Por que existe ao lado de [`run`]:** aqui a ausência do comando é um estado normal e
+/// esperado (a máquina pode não ter `pkg-config`), não uma condição de erro para propagar.
+/// Forçar `Result` nesses pontos encheria o código de `.ok()` — que é o mesmo que engolir
+/// erro com mais cerimônia.
+pub fn capture(cmd: &str, args: &[&str]) -> Option<String> {
+    let out = Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    if out.status.success() {
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+/// **O quê:** roda `cmd args` HERDANDO stdin/stdout/stderr — a saída aparece ao vivo e o
+/// processo pode interagir (senha do `sudo`, progresso do `cargo`). `Ok(())` se sair 0.
+///
+/// **Onde:** todo passo demorado do caminho de atualização: `rustup`, `cargo build`,
+/// `git clone`, instalação de libs de build.
+///
+/// **Por que herdar e não capturar:** um `cargo build` de vinte minutos com a saída
+/// engolida é indistinguível de um travamento — e um `sudo` sem terminal simplesmente
+/// nunca recebe a senha.
+pub fn run_inherit(cmd: &str, args: &[&str]) -> Result<(), String> {
+    let status = Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| format!("não consegui executar `{cmd}`: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("`{cmd}` falhou ({status})"))
+    }
+}
+
+/// **O quê:** [`run_inherit`] com variáveis de ambiente EXTRAS para este processo filho.
+///
+/// **Onde:** os builds, para passar `CARGO_TARGET_DIR` (o `target/` compartilhado).
+///
+/// **Por que não exportar no processo:** o market roda num terminal que pode ter qualquer
+/// coisa exportada, e mexer no ambiente do próprio processo vazaria para todo comando
+/// seguinte. O escopo certo da variável é o filho que a usa.
+pub fn run_inherit_env(cmd: &str, args: &[&str], env: &[(&str, &str)]) -> Result<(), String> {
+    let mut c = Command::new(cmd);
+    c.args(args)
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit());
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    let status = c.status().map_err(|e| format!("não consegui executar `{cmd}`: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("`{cmd}` falhou ({status})"))
+    }
+}
+
 /// Segundos desde a época (timestamp sem depender de crate de data).
 pub fn now_unix() -> u64 {
     std::time::SystemTime::now()

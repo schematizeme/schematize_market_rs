@@ -17,6 +17,7 @@
 //! não há duas listas para reconciliar, há uma.
 
 pub mod appsdacasa;
+pub mod atualizar;
 pub mod environments;
 pub mod nucleo;
 

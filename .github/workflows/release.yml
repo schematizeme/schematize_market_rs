@@ -1,0 +1,132 @@
+name: release-market
+
+# Compila o `schematize-market` para Linux/macOS/Windows e anexa os binários ao release.
+#
+# POR QUE ESTE WORKFLOW É BLOQUEANTE DO ADR-0013 (decisão D2), e não acabamento:
+#
+# O `schematize-updater` era o único artefato que a casa publicava pré-compilado por SO — e o
+# `install.sh` o baixava pronto justamente por ele ser pequeno e estável. Ao herdar o papel de
+# gestor, o market herda a obrigação. Enquanto ele só compilar do fonte, "instalar o market"
+# custa minutos e um toolchain, e o bootstrap continuaria precisando do updater para o caminho
+# rápido — ou seja, a unificação não teria acontecido de fato.
+#
+# Roda SÓ em push de tag `v*`: publicar binário é ato de release, não de commit.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  # Portão barato ANTES de gastar quatro runners: um teste vermelho tem de reprovar aqui, e não
+  # depois de publicar um binário quebrado para usuário real. Deletar um release não desfaz o
+  # download de quem já pegou.
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Formato, lints e testes
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+  build:
+    needs: gate
+    strategy:
+      # `fail-fast: false` de propósito: uma plataforma que falha não pode cancelar as outras.
+      # Publicar três dos quatro assets é melhor que publicar nenhum — quem está nas três tem
+      # o caminho rápido, e a quarta cai no build do fonte, que continua funcionando.
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            asset: schematize-market-linux-x86_64
+            asset_gui: schematize-market-gui-linux-x86_64
+          # `macos-15`, NÃO `macos-14`. Duas imagens já morderam esta casa:
+          #   - `macos-13` foi APOSENTADA, e um job que a peça fica *queued para sempre* em vez
+          #     de falhar — segura o release inteiro sem nunca dar erro. Já custou uma passada.
+          #   - `macos-14` está marcada DEPRECATED no `actions/runner-images` (issue 13518) e
+          #     segue o mesmo caminho. O CLI e o updater ainda a usam; este workflow nasce na
+          #     imagem viva em vez de herdar a dívida.
+          - os: macos-15
+            target: aarch64-apple-darwin
+            asset: schematize-market-macos-arm64
+            asset_gui: schematize-market-gui-macos-arm64
+          # Intel CROSS-COMPILADO no runner arm64, por `--target`. Assim o release não depende
+          # de imagem macOS x64 nenhuma — que é justamente a família que vem sendo aposentada.
+          - os: macos-15
+            target: x86_64-apple-darwin
+            asset: schematize-market-macos-x86_64
+            asset_gui: schematize-market-gui-macos-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: schematize-market-windows-x86_64.exe
+            asset_gui: schematize-market-gui-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: rustup target add ${{ matrix.target }}
+      - name: Build (release)
+        run: cargo build --release --target ${{ matrix.target }}
+      # O binário TEM de responder `--version` antes de ser publicado. Um asset que não executa
+      # baixa com HTTP 200 e só falha na máquina de quem instalou — e é exatamente o que o
+      # self-update (D3) tem de recusar depois. Recusar aqui é mais barato.
+      #
+      # Só nos alvos NATIVOS do runner: o binário Intel cross-compilado no runner arm64 não roda
+      # ali, e afirmar que roda seria o teste mentindo.
+      - name: O asset executa? (alvos nativos)
+        if: matrix.target != 'x86_64-apple-darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin="target/${{ matrix.target }}/release/schematize-market"
+          [ "${{ runner.os }}" = "Windows" ] && bin="$bin.exe"
+          "$bin" --version
+      # A JANELA do gestor, publicada AO LADO do binário (ADR-0014 D5).
+      #
+      # Ela vive em repo próprio (`schematize-updater-gui` — o repo mantém o nome antigo; o
+      # binário, não: ver o README de lá). Sai daqui porque o dono do binário é o dono da
+      # janela dele, e porque acrescentar um asset a esta esteira custa este bloco, enquanto
+      # um release próprio custaria outra matriz de quatro alvos e outra tag para lembrar de
+      # cortar.
+      #
+      # Best-effort: se ela não compilar, o release do market NÃO falha. O gestor headless é o
+      # que precisa chegar; a janela é a interface amigável por cima dele. Falhar o release
+      # inteiro por causa dela inverteria a prioridade.
+      - name: Janela do gestor (opcional)
+        id: janela
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/schematizeme/schematize-updater-gui.git ../janela
+          cargo build --release --locked --manifest-path ../janela/Cargo.toml \
+            --target ${{ matrix.target }}
+          sfx=""; [ "${{ runner.os }}" = "Windows" ] && sfx=".exe"
+          cp "../janela/target/${{ matrix.target }}/release/schematize-market-gui$sfx" \
+             "${{ matrix.asset_gui }}"
+
+      - name: Nomear o asset (unix)
+        if: runner.os != 'Windows'
+        run: cp target/${{ matrix.target }}/release/schematize-market ${{ matrix.asset }}
+      - name: Nomear o asset (windows)
+        # `shell: cmd` explicito: `copy` com barra invertida e sintaxe do cmd. Sem esta linha o
+        # passo herda o `pwsh` (default do runner Windows) e funciona por acidente, via alias —
+        # e o analisador le a linha como bash e reporta falso positivo.
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: copy target\${{ matrix.target }}\release\schematize-market.exe ${{ matrix.asset }}
+      - name: Anexar ao release
+        uses: softprops/action-gh-release@v2
+        with:
+          # A janela entra só se o passo dela deu certo — `continue-on-error` deixa o job
+          # seguir, e sem esta condição o upload tentaria anexar um arquivo que não existe.
+          files: |
+            ${{ matrix.asset }}
+            ${{ steps.janela.outcome == 'success' && matrix.asset_gui || '' }}

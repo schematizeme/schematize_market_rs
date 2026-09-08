@@ -32,35 +32,34 @@ use std::path::PathBuf;
 pub struct AppExterno {
     /// Nome do binário no `$PATH`.
     pub bin: &'static str,
-    /// Flag do `install.sh` que o instala.
-    pub flag: &'static str,
     /// Uma linha sobre o que ele faz — vai no `status`.
     pub sobre: &'static str,
 }
+
+// O campo `flag` (a flag do `install.sh` que instalava este app) SAIU — ver
+// [`instalar_do_fonte`]. Ele só existia para montar o `curl | bash`, que deixou de ser o
+// caminho de instalação.
 
 /// Os apps externos que o schematize conhece.
 pub const EXTERNOS: &[AppExterno] = &[
     AppExterno {
         bin: "schematize-deployer",
-        flag: "--deployer",
         sobre: "SSH, VPS, DNS e cofre — opera servidor com a credencial fora do agente",
     },
     AppExterno {
         bin: "schematize-optimizer",
-        flag: "--optimizer",
         sobre: "mede o ambiente de dev e põe cada software no seu teto de recurso",
     },
-    AppExterno {
-        bin: "schematize-skills",
-        flag: "--skills",
-        sobre: "catálogo de skills do Claude: instalar, versionar e aplicar a projeto",
-    },
-    AppExterno {
-        bin: "schematize-overdev",
-        flag: "--overdev",
-        sobre: "desenvolvimento contínuo dirigido por checklist, que não para até fechar",
-    },
 ];
+
+// O `schematize-skills` e o `schematize-overdev` NÃO estão aqui, e é de propósito: eles ainda
+// não existem. Listá-los daria uma linha "não instalado" que a pessoa tentaria instalar, e o
+// `install` mandaria uma flag que o `install.sh` não conhece.
+//
+// Mais que isso: o ADR-0012 diz que eles podem **não sair** — são 11 e 8 consumidores no
+// núcleo do hub, e a decisão foi que um overdev meio extraído é pior que um hub com overdev
+// dentro. Anunciar aqui o que talvez nunca exista seria prometer pela tabela o que a decisão
+// se recusou a prometer. Entram quando forem repositório com release, não antes.
 
 /// **O quê:** acha um app externo pelo nome do binário.
 /// **Onde:** a CLI, ao despachar `schematize <app> …`.
@@ -68,16 +67,10 @@ pub fn externo(bin: &str) -> Option<&'static AppExterno> {
     EXTERNOS.iter().find(|a| a.bin == bin)
 }
 
-/// Nome do binário do Deployer.
-pub const BIN: &str = "schematize-deployer";
-/// Repositório, para a mensagem de instalação e para o `install.sh`.
-pub const REPO: &str = "schematizeme/schematize_deployer_rs";
-/// O `install.sh` que sabe instalar o Deployer — é o do SCHEMATIZE, com `--deployer`.
-///
-/// Repetido aqui em vez de reusar o do `selfupdate`: lá ele é privado e `#[cfg(unix)]`, e
-/// esta mensagem tem de existir no Windows também (onde ela é justamente a única saída).
-const INSTALL_SH: &str =
-    "https://raw.githubusercontent.com/schematizeme/schematize-cli/main/install.sh";
+// As constantes `BIN`, `REPO` e `INSTALL_SH` saíram daqui (ADR-0013). As duas primeiras
+// duplicavam o que a tabela `atualizar::APPS_GERIDOS` já diz — e duas fontes para o mesmo
+// fato é como o nome do binário do Deployer ficou errado por um release inteiro. A terceira
+// era a URL do `curl | bash`, que deixou de existir como caminho de instalação.
 
 /// O que se sabe do Deployer nesta máquina.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,28 +115,80 @@ pub fn descobrir_app(bin: &str) -> Estado {
     }
 }
 
-/// **O quê:** o estado do Deployer. **Onde:** compat com quem já chamava.
-pub fn descobrir() -> Estado {
-    descobrir_app(BIN)
+/// **O quê:** instala um app da casa COMPILANDO do fonte, aqui mesmo. `Err` com a causa se
+/// não der.
+///
+/// **Onde:** `schematize-market install <app>`, e o `install.sh --deployer|--optimizer`, que
+/// agora delega para cá.
+///
+/// ## O LOOP que esta função existe para desfazer (ADR-0013, D1)
+///
+/// O que estava aqui montava `curl -fsSL <install.sh> | bash -s -- --deployer` e executava.
+/// Enquanto o `install.sh` era o único que sabia compilar, isso era razoável. Deixou de ser
+/// por duas razões, e a segunda é fatal:
+///
+/// 1. **O market já sabe compilar.** [`crate::atualizar::fonte::build_one`] faz exatamente o
+///    que aquele trecho do script fazia — checkout persistente, `target/` compartilhado, build
+///    incremental. Manter os dois era manter duas verdades sobre "como se instala um app da
+///    casa", que é a duplicação que o ADR-0013 existe para acabar.
+/// 2. **O `install.sh` passou a delegar para cá.** Se esta função continuasse chamando o
+///    script, `install.sh --deployer` → `market install` → `install.sh --deployer` seria um
+///    **loop infinito**, recompilando o mundo a cada volta.
+///
+/// De quebra some um `curl | bash` de dentro de uma ferramenta: baixar e executar shell
+/// arbitrário no meio de um programa é o tipo de elo que uma cadeia de suprimentos não
+/// precisa ter.
+///
+/// **Herda o terminal de propósito:** a compilação leva minutos e pode pedir sudo para as
+/// libs de build. Capturar a saída deixaria a pessoa olhando um cursor parado, e o pedido de
+/// senha não teria onde aparecer.
+pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
+    let app = crate::atualizar::APPS_GERIDOS
+        .iter()
+        .find(|a| a.bin == bin)
+        .ok_or_else(|| format!("não sei de que repositório vem o `{bin}`"))?;
+
+    let cargo = crate::nucleo::plataforma::ensure_toolchain()?;
+    // As libs de build do sistema: o Deployer e o Optimizer não desenham janela, mas o
+    // `ensure_build_deps` também traz o compilador C e o `pkg-config`, sem os quais nem as
+    // deps nativas comuns linkam. É o mesmo passo que o `install.sh` fazia antes de compilar.
+    crate::nucleo::plataforma::ensure_build_deps()?;
+
+    crate::atualizar::fonte::build_one(
+        cargo.to_str().unwrap_or("cargo"),
+        app.repo,
+        &[],
+        None,
+        &app.bin_name(),
+        &app.caminho(),
+    )
 }
 
-/// **O quê:** a linha de comando que instala o Deployer nesta máquina.
+/// **O quê:** põe o app recém-instalado no menu de aplicativos. Best-effort, mas **nunca
+/// mudo**.
 ///
-/// **Onde:** [`Estado::Ausente`] na CLI e na GUI. Função PURA — devolve o texto, não executa.
+/// **Onde:** depois de [`instalar_do_fonte`], uma vez por app.
 ///
-/// **Por que não instala sozinho:** instalar compila um app inteiro, pede rede e leva
-/// minutos. Fazer isso como efeito colateral de um `status` seria surpresa cara. O comando
-/// fica visível para a pessoa rodar quando quiser.
-pub fn como_instalar_app(flag: &str) -> String {
-    // O `install.sh` que tem a flag `--deployer` é o do SCHEMATIZE, não o do Deployer: é ele
-    // que já sabe cuidar do Rust, das libs de build e do target compartilhado. O Deployer
-    // entra como um quinto repo daquele mesmo fluxo.
-    format!("curl -fsSL {INSTALL_SH} | bash -s -- {flag}")
-}
-
-/// **O quê:** como instalar o Deployer. **Onde:** compat.
-pub fn como_instalar() -> String {
-    como_instalar_app("--deployer")
+/// **Por que best-effort e por que falante:** sem ícone é chato; derrubar a instalação por
+/// causa dele é pior. Mas best-effort **não é mudo** — o `install.sh` chamava
+/// `desktop --instalar >/dev/null 2>&1`, e quando a CLI dos apps foi traduzida a flag virou
+/// `--install`: as chamadas passaram a falhar **em silêncio** e dois apps sumiram do menu sem
+/// uma linha de erro. Aqui a falha diz o comando exato para repetir à mão.
+pub fn registrar_no_menu(bin: &str) {
+    let caminho = match resolve_bin(bin) {
+        Some(p) => p,
+        None => return,
+    };
+    match crate::util::run(&caminho.to_string_lossy(), &["desktop", "--install"]) {
+        Ok(_) => println!("✓ {bin} já aparece no menu de aplicativos."),
+        Err(e) => {
+            println!("aviso: {bin} foi instalado, mas não consegui pôr o ícone no menu.");
+            println!("  o que falhou: {} desktop --install", caminho.display());
+            println!("  disse: {}", e.lines().next().unwrap_or("").trim());
+            println!("  rode o comando acima para tentar de novo; o app funciona pelo");
+            println!("  terminal do mesmo jeito.");
+        }
+    }
 }
 
 #[cfg(test)]
@@ -161,14 +206,41 @@ mod tests {
         assert!(!ruim.utilizavel(), "binário que não responde não pode contar como instalado");
     }
 
-    /// A instrução de instalação cita o repo do schematize (é o `install.sh` dele que tem a
-    /// flag) e a flag `--deployer`. Se um dia o caminho mudar, este teste é quem avisa.
+    /// **O LOOP, travado por teste.** Nenhum app da casa se instala por `curl | bash` do
+    /// `install.sh` — o market compila ele mesmo. Se alguém reintroduzir aquele caminho, o
+    /// `install.sh --deployer` (que hoje delega para cá) volta a reentrar em si mesmo.
     #[test]
-    fn a_instrucao_de_instalar_e_acionavel() {
-        let c = como_instalar();
-        assert!(c.contains("--deployer"), "sem a flag o comando instala o app errado: {c}");
-        assert!(c.contains("install.sh"), "{c}");
-        assert!(c.starts_with("curl "), "tem de ser colável no terminal: {c}");
+    fn instalar_app_da_casa_nao_passa_por_curl_nem_pelo_install_sh() {
+        let fonte = include_str!("appsdacasa.rs");
+        // Só o código de PRODUÇÃO: este próprio teste cita os literais proibidos (é o que
+        // ele procura), e os comentários acima explicam por que o `curl | bash` saiu —
+        // citá-los ali é o contrário de um bug.
+        let producao = fonte.split("#[cfg(test)]").next().unwrap_or(fonte);
+        for (n, linha) in producao.lines().enumerate() {
+            let l = linha.trim();
+            if l.starts_with("//") || l.starts_with("///") {
+                continue;
+            }
+            for proibido in ["curl ", "install.sh", "bash -s"] {
+                assert!(
+                    !l.contains(proibido),
+                    "linha {}: `{proibido}` voltou ao caminho de instalar app da casa — \
+                     é o loop do ADR-0013",
+                    n + 1
+                );
+            }
+        }
+    }
+
+    /// Todo app instalável tem de ter repo conhecido — senão [`instalar_do_fonte`] não sabe de
+    /// onde compilar e a pessoa recebe um erro em vez de um app.
+    #[test]
+    fn todo_app_instalavel_sabe_de_onde_vem() {
+        for e in EXTERNOS {
+            let a = crate::atualizar::APPS_GERIDOS.iter().find(|a| a.bin == e.bin);
+            assert!(a.is_some(), "{} é instalável mas não tem repo em APPS_GERIDOS", e.bin);
+            assert!(a.unwrap().repo.contains('/'), "{}: repo inválido", e.bin);
+        }
     }
 
     /// **A regra que a ponte existe para cumprir:** descobrir NUNCA falha. Numa máquina sem
@@ -177,7 +249,7 @@ mod tests {
     fn descobrir_nunca_falha_mesmo_sem_deployer() {
         // Não afirmamos QUAL estado (a máquina de quem roda pode ter o Deployer instalado);
         // afirmamos que a função retorna, sem panicar e sem `Result`.
-        let e = descobrir();
+        let e = descobrir_app("schematize-deployer");
         assert!(matches!(e, Estado::Instalado { .. } | Estado::Ausente | Estado::Quebrado { .. }));
     }
 }

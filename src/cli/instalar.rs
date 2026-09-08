@@ -9,7 +9,9 @@
 //! terminaria num "não conheço a linguagem schematize-deployer" — verdade técnica e resposta
 //! inútil.
 
-use market::appsdacasa::{como_instalar_app, descobrir_app, externo, Estado, EXTERNOS};
+use market::appsdacasa::{
+    descobrir_app, externo, instalar_do_fonte, registrar_no_menu, Estado, EXTERNOS,
+};
 use market::environments;
 
 /// **O quê:** instala um app da casa, uma linguagem ou uma ferramenta de dev.
@@ -42,60 +44,49 @@ pub(crate) fn remove_cmd(what: &str, method: Option<String>, dry_run: bool) -> R
     environments::remove(what, method, dry_run)
 }
 
-/// **O quê:** instala um app externo compilando do fonte, com aviso e confirmação.
+/// **O quê:** instala um app externo COMPILANDO do fonte, com aviso e confirmação.
+///
 /// **Onde:** [`install_cmd`], quando o alvo está na tabela [`EXTERNOS`].
 ///
-/// **Herda o terminal de propósito:** a compilação leva minutos e o `install.sh` pode pedir
-/// sudo para as libs de build. Capturar a saída deixaria a pessoa olhando um cursor parado, e
-/// o pedido de senha não teria onde aparecer.
+/// **O que mudou no ADR-0013:** isto executava `curl -fsSL <install.sh> | bash -s -- --flag`.
+/// Agora o market compila ele mesmo ([`instalar_do_fonte`]) — porque ele já sabe, e porque o
+/// `install.sh` passou a delegar para cá: manter o `curl` faria os dois se chamarem em círculo.
 fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
-    // Deny-by-default: só o que está na tabela. Nome desconhecido não vira flag inventada num
-    // script que roda com sudo.
+    // Deny-by-default: só o que está na tabela. Nome desconhecido não vira alvo de build.
     let Some(a) = externo(nome) else {
         let nomes: Vec<&str> = EXTERNOS.iter().map(|x| x.bin).collect();
         return Err(format!("não conheço o app `{nome}`. Os que existem: {}", nomes.join(", ")));
     };
-    let cmd = como_instalar_app(a.flag);
 
     if let Estado::Instalado { versao, caminho } = descobrir_app(a.bin) {
         println!("{} {versao} já está instalado em {}", a.bin, caminho.display());
-        println!("Para atualizar, rode o mesmo comando — ele recompila do fonte:");
-        println!("    {cmd}");
+        println!("Para atualizar, rode:");
+        println!("    schematize-market update");
         return Ok(());
     }
     if dry_run {
-        println!("(dry-run) rodaria: {cmd}");
+        println!("(dry-run) compilaria o `{}` do fonte e o poria no menu.", a.bin);
         return Ok(());
     }
 
     println!("Vou instalar o `{}` — {}", a.bin, a.sobre);
     println!();
-    println!("  Isto COMPILA do fonte e leva minutos. Precisa de rede, e o instalador");
-    println!("  pode pedir sudo para as bibliotecas de build do sistema.");
-    println!("  Comando: {cmd}");
+    println!("  Isto COMPILA do fonte e leva minutos. Precisa de rede, e pode pedir sudo");
+    println!("  para as bibliotecas de build do sistema.");
     if !yes && !environments::confirm() {
         println!("cancelado — nada foi feito.");
         return Ok(());
     }
 
-    let st = std::process::Command::new("bash")
-        .arg("-c")
-        .arg(&cmd)
-        .status()
-        .map_err(|e| format!("não consegui iniciar a instalação: {e}"))?;
-    if !st.success() {
-        return Err(format!(
-            "a instalação terminou com erro ({}). O market segue funcionando; o `{}` é opcional.",
-            st.code().map(|c| c.to_string()).unwrap_or_else(|| "sinal".into()),
-            a.bin
-        ));
-    }
-    // Veredito pelo ESTADO, não pelo código de saída: o `install.sh` é best-effort com os
-    // apps opcionais, então ele pode sair 0 sem ter instalado nada.
+    instalar_do_fonte(a.bin)?;
+    registrar_no_menu(a.bin);
+
+    // Veredito pelo ESTADO, não pelo código de saída: um build que termina 0 sem produzir um
+    // binário que responde não instalou nada, e dizer "pronto" ali seria mentir.
     match descobrir_app(a.bin) {
         Estado::Instalado { versao, .. } => println!("\n✓ {} {versao} instalado.", a.bin),
         _ => println!(
-            "\nO instalador terminou, mas o `{}` ainda não responde. Rode \
+            "\nO build terminou, mas o `{}` ainda não responde. Rode \
              `schematize-market list` para ver o estado.",
             a.bin
         ),

@@ -8,7 +8,49 @@ schematize-market install go --method mise
 schematize-market install schematize-deployer
 schematize-market switch rust --to official
 schematize-market desktop --install             # ícone no menu de aplicativos
+
+schematize-market update                        # atualiza TUDO (app, GUI, apps, e ele mesmo)
+schematize-market update --dry-run              # o plano, sem mexer em nada
+schematize-market status                        # versões, plataforma, pin, o que está instalado
+schematize-market pin 0.62.0                    # fixa o app numa versão; `pin latest` desafixa
+schematize-market unpin                         # volta a seguir a última publicada
+schematize-market run                           # abre a GUI pelo caminho absoluto
+schematize-market remove node                   # remove um runtime (detecta como foi instalado)
 ```
+
+## Ele é o dono de INSTALAR e ATUALIZAR (ADR-0013)
+
+Havia três programas que sabiam instalar — este, o `install.sh` e o `schematize-updater` —
+cada um do seu jeito, e nenhum deles dono. O `market install schematize-deployer` chegava a
+disparar um `curl | bash` do `install.sh`, enquanto o updater já sabia atualizar o deployer.
+Dois caminhos para a mesma coisa, com comportamentos diferentes.
+
+O `schematize-updater` foi **absorvido por este app** e deixou de existir. O `install.sh` ficou
+sendo só o que ele já era de verdade: o bootstrap de primeira vez, que instala o market e
+delega o resto. Quem tinha o comando do updater na mão troca só o nome do programa — os verbos
+são os mesmos (`update`, `status`, `pin`, `unpin`, `run`).
+
+### O que o `update` faz, e o que ele NÃO faz
+
+**Faz:** o app (CLI + GUI) pela versão-alvo — binário pronto quando há para a plataforma,
+compilando do fonte quando não —, mais cada app do ecossistema **que já esteja instalado**, e
+o próprio market.
+
+**Não faz:** instalar o que ninguém pediu. Um app ausente aparece no `--dry-run` como
+*"não instalado → ignorado"*, com o motivo. Quem roda `update` quer o que já tem, mais novo —
+não software novo aparecendo no `~/.cargo/bin` porque a casa lançou outro produto.
+
+### Como ele troca o próprio binário sem se quebrar
+
+Trocar o executável que está rodando o comando é o único modo de falha capaz de deixar a
+máquina **sem gestor de pacotes nenhum** — e sem gestor não há por onde consertar. A rede tem
+três camadas: escreve `<bin>.novo` **ao lado** e troca por `rename(2)` atômico (nunca por cima
+do binário em execução); **verifica a CÓPIA já gravada** com `--version` antes de trocar (uma
+cópia truncada por disco cheio passa por qualquer checagem feita na origem); e varre
+temporários órfãos na execução seguinte — num `SIGKILL` nenhum handler nosso roda, então a
+única limpeza que funciona é a da próxima vez.
+
+Se qualquer passo falhar, a troca **não acontece** e o binário antigo continua valendo.
 
 ## O que ele instala
 
@@ -16,7 +58,8 @@ schematize-market desktop --install             # ícone no menu de aplicativos
 |---|---|
 | **runtimes** | Go, Rust, Node, Python, Ruby, C#… por `docker`, `mise`, `distro` ou `official` |
 | **ferramentas de dev** | Claude Code, VS Code, Codex CLI |
-| **apps do ecossistema** | `schematize-deployer`, `schematize-optimizer`, `schematize-skills`, `schematize-overdev` |
+| **apps do ecossistema** | `schematize-deployer`, `schematize-optimizer` (compilados do fonte por ele mesmo) |
+| **o app e ele próprio** | `schematize`, `schematize-gui` e o `schematize-market` — via `update` |
 
 **Uma lista só.** O pedido que originou este app foi *"deployer e optimizer deveriam aparecer
 no env para instalar"*. A leitura rasa seria somar os apps à tabela do `env`. A leitura certa
