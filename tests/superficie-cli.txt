@@ -1,0 +1,26 @@
+CMD schematize-market
+  SOBRE schematize market — install and remove programs
+CMD schematize-market desktop
+  SOBRE Icon and application-menu entry — so the app opens without the hub
+  ARG install              --install
+  ARG remove               --remove
+CMD schematize-market install
+  SOBRE Install a language runtime, a dev tool, or an ecosystem app
+  ARG dry_run              --dry-run
+  ARG method               --method
+  ARG what                  OBRIGATORIO
+  ARG yes                  --yes -y
+CMD schematize-market list
+  SOBRE Everything installable, and what is already installed. This is what the icon opens
+  ARG wait                 --wait
+CMD schematize-market remove
+  SOBRE Remove a language runtime or a dev tool (auto-detects how it was installed)
+  ARG dry_run              --dry-run
+  ARG method               --method
+  ARG what                  OBRIGATORIO
+CMD schematize-market switch
+  SOBRE Switch how a language is installed. Installs the new method FIRST, then removes the old
+  ARG dry_run              --dry-run
+  ARG lang                  OBRIGATORIO
+  ARG to                   --to OBRIGATORIO
+  ARG yes                  --yes -y
