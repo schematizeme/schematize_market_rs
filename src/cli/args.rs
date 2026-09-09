@@ -29,6 +29,9 @@ pub(crate) enum Cmd {
         /// Wait for a keypress at the end (used by the desktop launcher).
         #[arg(long)]
         wait: bool,
+        /// Machine-readable output with stable, never-translated keys. What the window reads.
+        #[arg(long)]
+        json: bool,
     },
     /// Install a language runtime, a dev tool, or an ecosystem app.
     Install {

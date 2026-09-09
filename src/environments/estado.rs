@@ -69,7 +69,7 @@ pub fn status() -> Vec<LangEnv> {
 }
 
 /// Texto de status pra a tabela: instalado por qual método, ou só "instalado", ou não.
-pub(crate) fn status_text(le: &LangEnv) -> String {
+pub fn status_text(le: &LangEnv) -> String {
     // A PROCEDÊNCIA manda quando existe: ela distingue as quatro vias, e diz "não sei" em vez
     // de deixar um "instalado" mudo. O `installed` (docker/mise) fica como retaguarda para
     // quem consome a struct e ainda não conhece o campo novo.

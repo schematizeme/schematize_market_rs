@@ -20,7 +20,7 @@ fn main() {
     restaurar_sigpipe();
     let cli = Cli::parse();
     let r = match cli.cmd {
-        Cmd::List { wait } => cli::lista::list_cmd(wait),
+        Cmd::List { wait, json } => cli::lista::list_cmd(wait, json),
         Cmd::Install { what, method, dry_run, yes } => {
             cli::instalar::install_cmd(&what, method, dry_run, yes)
         }

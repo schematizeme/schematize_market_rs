@@ -17,7 +17,15 @@ use market::nucleo::{desktop, icone, util};
 
 /// **O quê:** imprime tudo que este app instala, e o estado de cada coisa.
 /// **Onde:** `schematize-market list`, e o lançador do menu de aplicativos (com `--wait`).
-pub(crate) fn list_cmd(wait: bool) -> Result<(), String> {
+pub(crate) fn list_cmd(wait: bool, json: bool) -> Result<(), String> {
+    // JSON é contrato de máquina: sai sozinho, sem o cabeçalho humano e sem o `--wait`, que
+    // são da tela. Misturar os dois daria um JSON que só parseia depois de alguém cortar as
+    // primeiras linhas — que é o mesmo tipo de contrato-por-acidente que este modo existe
+    // para acabar.
+    if json {
+        crate::cli::listajson::imprimir();
+        return Ok(());
+    }
     market::environments::list();
     println!();
     secao_apps();
