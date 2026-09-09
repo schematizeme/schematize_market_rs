@@ -99,6 +99,28 @@ jobs:
       # Best-effort: se ela não compilar, o release do market NÃO falha. O gestor headless é o
       # que precisa chegar; a janela é a interface amigável por cima dele. Falhar o release
       # inteiro por causa dela inverteria a prioridade.
+      # As libs de X11/Wayland/GL/fontconfig que o Slint precisa pra LINKAR no Linux. macOS e
+      # Windows trazem o stack grafico nativo; o runner ubuntu nao traz nada disso.
+      #
+      # POR QUE ESTE PASSO NASCEU DEPOIS: sem ele a janela compilava no macOS e no Windows e
+      # falhava so no Linux — e falhava EM SILENCIO, porque `continue-on-error: true` faz o
+      # `conclusion` do passo virar `success` mesmo com `outcome: failure`. O release saia
+      # "verde", com 7 assets em vez de 8, e o unico que faltava era o da plataforma principal.
+      # O `install_janela_do_gestor()` do install.sh baixaria um asset que nunca existiu.
+      #
+      # A lista e a mesma do release do CLI, que ja publica GUI pra Linux — a diferenca entre
+      # os dois workflows era esta, e so esta.
+      - name: deps da janela (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            pkg-config \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev \
+            libxkbcommon-dev libwayland-dev libgl1-mesa-dev \
+            libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libfontconfig1-dev
+
       - name: Janela do gestor (opcional)
         id: janela
         continue-on-error: true
