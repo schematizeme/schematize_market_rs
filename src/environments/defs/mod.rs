@@ -14,6 +14,7 @@ mod distro;
 // de arquivo, não de superfície: nada fora daqui precisou mudar de nome.
 pub use distro::distro_indisponivel;
 use distro::{distro_install_cmd, distro_pkgs, distro_remove_cmd};
+use distro::{distro_install_pkgs_cmd, passos_do_repo, pkgs_do_repo, repo_extra, versao_da_distro};
 
 /// Um environment de linguagem: runtime + ferramentas comuns de desenvolvimento.
 pub struct Env {
@@ -352,12 +353,49 @@ pub fn install_recipe(env: &Env, method: Method, fam: Family, mise_present: bool
                     return Recipe::Na(format!("sem pacote de distro mapeado pra {}.", env.display))
                 }
             };
-            // Recusa ANTES de montar o plano. Sem isto, a pessoa digitava a senha do sudo
-            // para ver o gerenciador de pacotes morrer com "Nenhum fornecedor encontrado".
+            // Recusa ANTES de montar o plano, mas SÓ quando não há saída. Sem isto, a pessoa
+            // digitava a senha do sudo para ver o gerenciador morrer com "Nenhum fornecedor
+            // encontrado".
             if let Some(motivo) = distro_indisponivel(env.lang, fam) {
                 return Recipe::Na(motivo);
             }
-            let mut steps = vec![step(&distro_install_cmd(fam, &pkgs), fam.label(), true, false)];
+            let mut steps = Vec::new();
+
+            // A distro não empacota, mas o fornecedor publica um repo oficial? Então o
+            // trabalho é ADICIONAR o repo — não devolver a tarefa a quem pediu a instalação.
+            // Os passos entram aqui, visíveis no plano com marca de sudo e procedência.
+            let cmd_pkgs = match repo_extra(env.lang, fam) {
+                Some(r) => {
+                    let Some(v) = versao_da_distro() else {
+                        return Recipe::Na(format!(
+                            "para instalar {} eu preciso adicionar o repo {}, mas não consegui \
+                             ler a versão da distro em /etc/os-release.\n  Use outro método: \
+                             `install {} --method mise`",
+                            env.display, r.nome, env.lang
+                        ));
+                    };
+                    let passos = passos_do_repo(&r, fam, &v);
+                    if passos.is_empty() {
+                        return Recipe::Na(format!(
+                            "não sei adicionar o repo {} nesta família ({}).\n  Use outro \
+                             método: `install {} --method mise`",
+                            r.nome,
+                            fam.label(),
+                            env.lang
+                        ));
+                    }
+                    // A procedência carrega a DOC do fornecedor, não só o nome. Adicionar
+                    // repo de terceiro é decisão de confiança: quem consente precisa poder
+                    // conferir de onde a chave e o repo vêm, sem sair para procurar.
+                    let fonte = format!("{} — {}", r.nome, r.doc);
+                    for c in passos {
+                        steps.push(step(&c, &fonte, true, false));
+                    }
+                    distro_install_pkgs_cmd(fam, pkgs_do_repo(env.lang, fam))
+                }
+                None => distro_install_cmd(fam, &pkgs),
+            };
+            steps.push(step(&cmd_pkgs, fam.label(), true, false));
             steps.extend(tool_steps(env.lang, Method::Distro));
             Recipe::Steps(steps)
         }
