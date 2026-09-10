@@ -62,9 +62,21 @@ pub(super) fn distro_pkgs(lang: &str) -> Option<DistroPkgs> {
             dnf: "ruby ruby-devel",
             arch: "ruby",
         },
+        // O SEGUNDO buraco da mesma classe do `csharp`, achado varrendo a coluna do zypper
+        // pacote a pacote nesta máquina: `nodejs` e `npm` **não existem** com esse nome no
+        // openSUSE. Ele empacota por versão (`nodejs22`, `npm24`) e publica os meta-pacotes
+        // `nodejs-default`/`npm-default`, que apontam para a versão padrão da distro.
+        //
+        // A tabela mandava `zypper install nodejs npm`, e o resultado seria exatamente o que o
+        // `csharp` deu: a pessoa digita a senha do sudo para ver "Nenhum fornecedor
+        // encontrado" e `exit status: 104`. A diferença é que ali o campo estava VAZIO — o que
+        // ao menos é a informação de que a via não existe. Aqui o campo estava PREENCHIDO E
+        // ERRADO, que não dispara guarda nenhuma.
+        //
+        // Medido: `zypper search --match-exact nodejs` devolve zero; `nodejs-default` existe.
         "node" => DistroPkgs {
             debian: "nodejs npm",
-            zypper: "nodejs npm",
+            zypper: "nodejs-default npm-default",
             dnf: "nodejs npm",
             arch: "nodejs npm",
         },
@@ -236,6 +248,109 @@ pub fn distro_indisponivel(lang: &str, fam: Family) -> Option<String> {
          oficial do fornecedor para ela.\n  Use outro método: `install {lang} --method mise`",
         fam.label()
     ))
+}
+
+#[cfg(test)]
+mod tests_matriz {
+    use super::*;
+
+    /// As sete linguagens que a tabela cobre. Escrita à mão de propósito: se alguém
+    /// acrescentar uma oitava e não a puser aqui, o teste abaixo reprova em vez de deixar a
+    /// nova entrar sem varredura.
+    const LINGUAGENS: [&str; 7] = ["go", "rust", "elixir", "csharp", "zig", "ruby", "node"];
+
+    const FAMILIAS: [Family; 4] = [Family::Debian, Family::Suse, Family::Fedora, Family::Arch];
+
+    /// **A MATRIZ INTEIRA É DECISÃO CONSCIENTE — 7 × 4 = 28 células, nenhuma por acidente.**
+    ///
+    /// # Por que este teste existe
+    ///
+    /// Duas células desta tabela já estiveram erradas, de duas formas diferentes:
+    ///
+    /// - **`csharp`/zypper estava VAZIA.** O vazio ao menos carrega informação: a via não
+    ///   existe, e o [`distro_indisponivel`] a transforma numa mensagem útil.
+    /// - **`node`/zypper estava PREENCHIDA E ERRADA** (`nodejs npm`, pacotes que não existem
+    ///   no openSUSE — ele empacota `nodejs-default`/`npm-default`). Isso não dispara guarda
+    ///   nenhuma: a ferramenta monta o comando, pede a senha do sudo, e o gerenciador morre
+    ///   com "Nenhum fornecedor encontrado" e `exit status: 104`.
+    ///
+    /// O segundo caso é o pior, e é o que este teste existe para tornar visível. Ele não
+    /// consegue verificar se um nome de pacote existe numa distro que não é esta — isso exige
+    /// as quatro distros. O que ele PODE fazer é garantir que cada célula tem uma resposta:
+    /// ou um nome de pacote, ou um repo de fornecedor, ou uma mensagem que diz o que fazer.
+    ///
+    /// **Nenhuma célula pode cair no silêncio.**
+    #[test]
+    fn cada_celula_da_matriz_tem_uma_resposta() {
+        for lang in LINGUAGENS {
+            let pkgs = distro_pkgs(lang)
+                .unwrap_or_else(|| panic!("`{lang}` não está na tabela de pacotes de distro"));
+            for fam in FAMILIAS {
+                let nomes = pkgs_da_familia(fam, &pkgs);
+                let tem_repo = repo_extra(lang, fam).is_some();
+                let recusa = distro_indisponivel(lang, fam);
+
+                // Exatamente UMA das três respostas, e nunca nenhuma.
+                let respostas = [!nomes.is_empty(), tem_repo, recusa.is_some()];
+                let quantas = respostas.iter().filter(|x| **x).count();
+                assert_eq!(
+                    quantas,
+                    1,
+                    "`{lang}` em {} tem {quantas} respostas (pacote={}, repo={tem_repo}, \
+                     recusa={}) — tem de ter exatamente uma",
+                    fam.label(),
+                    !nomes.is_empty(),
+                    recusa.is_some()
+                );
+
+                // A recusa DIZ O QUE FAZER. Uma recusa que só nega devolve à pessoa o
+                // trabalho que a ferramenta existe para fazer (§37.48).
+                if let Some(msg) = recusa {
+                    assert!(
+                        msg.contains("--method"),
+                        "`{lang}` em {}: a recusa não oferece saída — {msg}",
+                        fam.label()
+                    );
+                }
+            }
+        }
+    }
+
+    /// **Nome de pacote não tem espaço em branco solto nem vírgula.**
+    ///
+    /// A lista vai direto para a linha de comando do gerenciador, separada por espaço. Uma
+    /// vírgula (`"nodejs, npm"`) viraria um pacote chamado `nodejs,`, e o erro que a pessoa
+    /// veria seria sobre um nome que ninguém escreveu.
+    #[test]
+    fn nomes_de_pacote_sao_lista_separada_por_espaco() {
+        for lang in LINGUAGENS {
+            let pkgs = distro_pkgs(lang).unwrap();
+            for fam in FAMILIAS {
+                let nomes = pkgs_da_familia(fam, &pkgs);
+                assert!(!nomes.contains(','), "`{lang}`/{}: vírgula em `{nomes}`", fam.label());
+                assert_eq!(nomes.trim(), nomes, "`{lang}`/{}: espaço nas pontas", fam.label());
+                for n in nomes.split_whitespace() {
+                    assert!(
+                        n.chars().all(|c| c.is_ascii_alphanumeric() || "-_.+".contains(c)),
+                        "`{lang}`/{}: `{n}` não parece nome de pacote",
+                        fam.label()
+                    );
+                }
+            }
+        }
+    }
+
+    /// **O buraco do openSUSE, travado.** `nodejs`/`npm` nus não existem lá — a distro
+    /// empacota por versão e publica os meta-pacotes `-default`. Este teste é o que impede o
+    /// nome nu de voltar num "conserto" bem-intencionado.
+    #[test]
+    fn node_no_suse_usa_os_meta_pacotes_default() {
+        let pkgs = distro_pkgs("node").unwrap();
+        let suse = pkgs_da_familia(Family::Suse, &pkgs);
+        assert!(suse.contains("nodejs-default"), "medido: `nodejs` nu não existe no openSUSE");
+        assert!(suse.contains("npm-default"), "medido: `npm` nu não existe no openSUSE");
+        assert!(!suse.split_whitespace().any(|p| p == "nodejs" || p == "npm"), "{suse}");
+    }
 }
 
 #[cfg(test)]
