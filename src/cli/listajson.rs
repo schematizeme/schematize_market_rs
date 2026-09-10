@@ -14,8 +14,31 @@
 //!
 //! A tabela humana passa pelo catálogo i18n: `plataforma` em português, `platform` em inglês,
 //! `プラットフォーム` em japonês. **As chaves daqui nunca são traduzidas** — é isso que as torna
-//! contrato. O que é prosa (o rótulo de status, o `install_hint`) viaja como valor, para a
-//! janela ter o que mostrar sem reimplementar o catálogo.
+//! contrato.
+//!
+//! ## A regra do sufixo `_text`, e por que ela precisou ser escrita
+//!
+//! Este arquivo é o molde que o optimizer e o deployer seguiram. Ao escrever o `--json`
+//! daqueles dois, a regra que saiu foi mais dura: **documento byte a byte idêntico em qualquer
+//! idioma**. Aplicada a este arquivo, ela reprovava — o campo `status` carregava prosa, parte
+//! traduzida pelo catálogo (`env.installed_via`) e parte codificada em português direto no
+//! `Procedencia::rotulo` ("via distro (nodejs22)").
+//!
+//! A saída não foi tirar a prosa: a janela precisa de algo para MOSTRAR, e reimplementar o
+//! catálogo do market dentro dela seria pior. Foi separar as duas naturezas por NOME:
+//!
+//! - **Campo de DECISÃO** — `slug`, `category`, `methods`, `installed_via`, `present`,
+//!   `provenance`, `state`, `version`. Estável, nunca traduzido, é sobre isto que a janela
+//!   ramifica. É o `provenance` que foi acrescentado agora: a via existia só como prosa.
+//! - **Campo `*_text`** — `status_text`, e só ele. É prosa para exibir, muda com o idioma e
+//!   com revisão de texto, e **nenhuma decisão pode depender dele**.
+//!
+//! Assim o teste de idioma continua existindo e continua duro: mascarados os `*_text`, o
+//! documento é byte a byte idêntico. O que varia está declarado no próprio nome do campo, em
+//! vez de ficar implícito no bom senso de quem for mexer daqui a um ano.
+//!
+//! **O `hint` não é prosa** apesar do nome: é a lista de slugs de método separada por vírgula,
+//! ou o `source_hint` estático da ferramenta. Fica sem sufixo por isso.
 //!
 //! **JSON escrito à mão, não `serde::Serialize`:** o shape é o contrato, e escrevê-lo
 //! explicitamente faz uma mudança nele aparecer no diff. Com `Serialize`, renomear um campo
@@ -43,14 +66,19 @@ fn linha_env(le: &LangEnv) -> String {
     format!(
         "    {{\"slug\": \"{}\", \"display\": \"{}\", \"category\": \"{}\", \
          \"methods\": [{}], \"installed_via\": {}, \"present\": {}, \
-         \"hint\": \"{}\", \"status\": \"{}\"}}",
+         \"provenance\": \"{}\", \"hint\": \"{}\", \"status_text\": \"{}\"}}",
         esc(le.lang),
         esc(le.display),
         esc(le.category),
         metodos.join(", "),
         opt(le.installed.map(|m| m.slug().to_string())),
         le.runtime_present,
+        // A VIA, como slug estável. Antes ela só existia dentro do `status_text`, em prosa —
+        // e uma janela que precisasse dela teria de casar string humana.
+        le.procedencia.as_ref().map(|p| p.slug()).unwrap_or("absent"),
         esc(&le.install_hint),
+        // O ÚNICO campo de prosa, e o nome diz. Muda com o idioma; nenhuma decisão da janela
+        // pode depender dele.
         esc(&environments::status_text(le)),
     )
 }
@@ -125,11 +153,22 @@ mod tests {
     fn as_chaves_do_contrato_estao_todas_la() {
         let le = &environments::status()[0];
         let j = linha_env(le);
-        for k in
-            ["slug", "display", "category", "methods", "installed_via", "present", "hint", "status"]
-        {
+        for k in [
+            "slug",
+            "display",
+            "category",
+            "methods",
+            "installed_via",
+            "present",
+            "provenance",
+            "hint",
+            "status_text",
+        ] {
             assert!(j.contains(&format!("\"{k}\"")), "faltou a chave `{k}` em: {j}");
         }
+        // O campo de prosa se declara no NOME. Um `"status"` sem sufixo é a versão antiga,
+        // em que a janela não tinha como saber que aquilo mudava de idioma.
+        assert!(!j.contains("\"status\":"), "prosa sem o sufixo `_text`: {j}");
     }
 
     /// Estado de app é enum de TRÊS valores, não booleano: "está lá e não responde" é problema

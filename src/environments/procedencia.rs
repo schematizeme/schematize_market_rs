@@ -52,6 +52,28 @@ pub enum Procedencia {
 }
 
 impl Procedencia {
+    /// **O quê:** o slug ESTÁVEL da via, para contrato de máquina.
+    ///
+    /// **Onde:** `market list --json`, que a janela do market consome.
+    ///
+    /// **Por que não o [`Self::rotulo`]:** o rótulo é prosa ("via distro (nodejs22)"), muda
+    /// quando alguém revisa o texto, e carrega o nome do pacote junto. Uma janela que
+    /// DECIDISSE a partir dele voltaria a casar string humana — que é exatamente o bug que
+    /// custou uma versão inteira da janela irmã, e que não deu erro nenhum enquanto durou.
+    ///
+    /// O nome do pacote e o caminho ficam de fora de propósito: quem precisa deles lê o
+    /// `status_text`, que é para mostrar, não para decidir.
+    pub fn slug(&self) -> &'static str {
+        match self {
+            Procedencia::Mise => "mise",
+            Procedencia::Docker => "docker",
+            Procedencia::Distro { .. } => "distro",
+            Procedencia::Oficial { .. } => "official",
+            Procedencia::Desconhecida { .. } => "unknown",
+            Procedencia::Ausente => "absent",
+        }
+    }
+
     /// **O quê:** o texto curto da tabela.
     /// **Onde:** `env list`. Diz o que se sabe, e **admite** o que não se sabe.
     pub fn rotulo(&self) -> String {
