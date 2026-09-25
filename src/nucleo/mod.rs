@@ -16,5 +16,6 @@ pub mod util;
 // Ficam no núcleo, e não em `atualizar/`, porque não são do domínio de atualizar — são a
 // infraestrutura que qualquer caminho do market usa para saber onde está e o que baixar.
 pub mod plataforma;
+pub mod procedencia;
 pub mod rede;
 pub mod toolchain;
