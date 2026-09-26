@@ -58,6 +58,10 @@ pub const EXTERNOS: &[AppExterno] = &[
         bin: "schematize-git",
         sobre: "contas, o que ainda não saiu desta máquina, e os repositórios de cada conta",
     },
+    AppExterno {
+        bin: "schematize-skills",
+        sobre: "o catálogo de skills, o que está instalado, a autoria e o fork",
+    },
 ];
 
 // O `schematize-skills` e o `schematize-overdev` NÃO estão aqui, e é de propósito: eles ainda

@@ -50,6 +50,10 @@ pub const DATABASE_REPO: &str = "schematizeme/schematize_database_rs";
 /// **A janela dele também mora NESTE repo**, como segundo binário (ADR-0020) — ver a nota do
 /// `DATABASE_REPO`.
 pub const GIT_REPO: &str = "schematizeme/schematize_git_rs";
+/// O app de skills, extraído do hub pelo ADR-0012 F4 (E5 da extradição).
+///
+/// **A janela dele também mora NESTE repo**, como segundo binário (ADR-0020).
+pub const SKILLS_REPO: &str = "schematizeme/schematize_skills_rs";
 /// O repo DESTE programa.
 ///
 /// **Por que ele precisa saber o próprio repo:** o market é o único componente que ninguém
