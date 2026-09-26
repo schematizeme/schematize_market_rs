@@ -54,6 +54,10 @@ pub const EXTERNOS: &[AppExterno] = &[
         bin: "schematize-database",
         sobre: "lê o schema de um banco, modela e emite SQL ou migration expand-contract",
     },
+    AppExterno {
+        bin: "schematize-git",
+        sobre: "contas, o que ainda não saiu desta máquina, e os repositórios de cada conta",
+    },
 ];
 
 // O `schematize-skills` e o `schematize-overdev` NÃO estão aqui, e é de propósito: eles ainda

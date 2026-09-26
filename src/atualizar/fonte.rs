@@ -289,6 +289,7 @@ mod tests {
             plataforma::DEPLOYER_REPO,
             plataforma::OPTIMIZER_REPO,
             plataforma::DATABASE_REPO,
+            plataforma::GIT_REPO,
             plataforma::MARKET_REPO,
         ];
         // A tabela de apps geridos é a fonte da verdade do que se compila; a limpeza tem de

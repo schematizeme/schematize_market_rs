@@ -45,6 +45,11 @@ pub const OPTIMIZER_REPO: &str = "schematizeme/schematize_optimizer_rs";
 /// e do optimizer, cujas janelas têm repo próprio. Para quem instala, isso significa um
 /// `cargo install --bins`: sem a flag, o cargo recusa um pacote com mais de um binário.
 pub const DATABASE_REPO: &str = "schematizeme/schematize_database_rs";
+/// O app de contas/repos do git, extraído do hub pelo ADR-0019 (E2 da extradição).
+///
+/// **A janela dele também mora NESTE repo**, como segundo binário (ADR-0020) — ver a nota do
+/// `DATABASE_REPO`.
+pub const GIT_REPO: &str = "schematizeme/schematize_git_rs";
 /// O repo DESTE programa.
 ///
 /// **Por que ele precisa saber o próprio repo:** o market é o único componente que ninguém

@@ -188,6 +188,15 @@ pub const APPS_GERIDOS: &[AppGerido] = &[
         gui: Some("schematize-database-gui"),
     },
     AppGerido {
+        bin: "schematize-git",
+        repo: plataforma::GIT_REPO,
+        sobre: "contas, o que ainda não saiu desta máquina, e os repositórios de cada conta",
+        politica: Politica::SeInstalado,
+        legado: None,
+        // A janela mora no MESMO repo (ADR-0020) e sai do MESMO build.
+        gui: Some("schematize-git-gui"),
+    },
+    AppGerido {
         bin: "schematize-market",
         repo: plataforma::MARKET_REPO,
         sobre: "instala e atualiza tudo do ecossistema — este programa",
@@ -684,6 +693,7 @@ mod tests {
             ("schematize-deployer", "schematizeme/schematize_deployer_rs"),
             ("schematize-optimizer", "schematizeme/schematize_optimizer_rs"),
             ("schematize-database", "schematizeme/schematize_database_rs"),
+            ("schematize-git", "schematizeme/schematize_git_rs"),
             ("schematize-market", "schematizeme/schematize_market_rs"),
         ];
         assert_eq!(APPS_GERIDOS.len(), esperado.len(), "app novo sem entrada nesta asserção");
@@ -726,7 +736,7 @@ mod tests {
         }
         // Self-check: hoje há exatamente um app assim. Zero significaria que o laço não mediu
         // nada — e um teste que roda zero vezes passa sempre.
-        assert_eq!(com_janela, 1, "mudou o nº de apps com janela no mesmo repo — reveja");
+        assert_eq!(com_janela, 2, "mudou o nº de apps com janela no mesmo repo — reveja");
     }
 
     /// **O BUG MEDIDO, lado (b):** o nome do binário na tabela é o `[[bin]]` do Cargo.toml de
