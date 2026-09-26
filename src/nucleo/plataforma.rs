@@ -39,6 +39,12 @@ pub const GESTOR_GUI_REPO: &str = "schematizeme/schematize-updater-gui";
 pub const DEPLOYER_REPO: &str = "schematizeme/schematize_deployer_rs";
 /// O app que mede o ambiente de dev e limita recurso (ADR-0011).
 pub const OPTIMIZER_REPO: &str = "schematizeme/schematize_optimizer_rs";
+/// O app de schema/migration, extraído do hub pelo ADR-0018 (E1 da extradição).
+///
+/// **A janela dele mora NESTE repo, como segundo binário** (ADR-0020) — diferente do deployer
+/// e do optimizer, cujas janelas têm repo próprio. Para quem instala, isso significa um
+/// `cargo install --bins`: sem a flag, o cargo recusa um pacote com mais de um binário.
+pub const DATABASE_REPO: &str = "schematizeme/schematize_database_rs";
 /// O repo DESTE programa.
 ///
 /// **Por que ele precisa saber o próprio repo:** o market é o único componente que ninguém

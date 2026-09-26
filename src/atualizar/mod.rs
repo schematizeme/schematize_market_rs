@@ -80,6 +80,20 @@ pub struct AppGerido {
     /// deixando a pessoa parada na versão antiga para sempre. Reconhecer o nome velho é o que
     /// permite ATUALIZAR quem está nesse estado, e só então apagar o arquivo antigo.
     pub legado: Option<&'static str>,
+    /// A JANELA deste app, quando ela sai do MESMO repo (ADR-0020).
+    ///
+    /// **Por que isto é campo, e não "o market instala só o headless":** o
+    /// `schematize-database` tem dois `[[bin]]` no mesmo `Cargo.toml`, e o
+    /// [`fonte::build_one`] copia UM binário pelo nome. Sem este campo, instalar o app
+    /// deixaria a janela no `target/` e nunca em `~/.cargo/bin` — e a aba delegada do hub
+    /// diria "a janela não está instalada" para sempre, DEPOIS de a pessoa ter clicado em
+    /// instalar e visto o terminal terminar com sucesso.
+    ///
+    /// É a mesma forma do defeito que custou o `v0.2.0` do market: o passo verde, o asset
+    /// ausente, e nada no meio dizendo qual dos dois é a verdade.
+    ///
+    /// `None` para deployer e optimizer, cujas janelas têm repo próprio e esteira própria.
+    pub gui: Option<&'static str>,
 }
 
 impl AppGerido {
@@ -92,6 +106,16 @@ impl AppGerido {
     /// **O quê:** o caminho onde este componente é instalado. **Onde:** idem.
     pub fn caminho(&self) -> PathBuf {
         plataforma::install_dir().join(self.bin_name())
+    }
+
+    /// **O quê:** o nome e o destino da JANELA deste app, quando ela sai do mesmo repo.
+    ///
+    /// **Onde:** [`atualizar_componente`], logo depois do binário headless.
+    pub fn gui_nome_e_destino(&self) -> Option<(String, PathBuf)> {
+        let g = self.gui?;
+        let nome = format!("{g}{}", plataforma::exe_suffix());
+        let dst = plataforma::install_dir().join(&nome);
+        Some((nome, dst))
     }
 
     /// **O quê:** o caminho do binário com o nome ANTIGO, se este app foi renomeado.
@@ -143,6 +167,8 @@ pub const APPS_GERIDOS: &[AppGerido] = &[
         politica: Politica::SeInstalado,
         // Chamou-se `deployer` até o commit `0fa0112`; o ADR-0012 pôs o prefixo da casa.
         legado: Some("deployer"),
+        // A janela do deployer tem repo próprio — ela não sai deste build.
+        gui: None,
     },
     AppGerido {
         bin: "schematize-optimizer",
@@ -150,6 +176,16 @@ pub const APPS_GERIDOS: &[AppGerido] = &[
         sobre: "mede o ambiente de dev e põe cada software no seu teto de recurso",
         politica: Politica::SeInstalado,
         legado: None,
+        gui: None,
+    },
+    AppGerido {
+        bin: "schematize-database",
+        repo: plataforma::DATABASE_REPO,
+        sobre: "lê o schema de um banco, modela e emite SQL ou migration expand-contract",
+        politica: Politica::SeInstalado,
+        legado: None,
+        // A janela mora no MESMO repo (ADR-0020) e sai do MESMO build.
+        gui: Some("schematize-database-gui"),
     },
     AppGerido {
         bin: "schematize-market",
@@ -157,6 +193,7 @@ pub const APPS_GERIDOS: &[AppGerido] = &[
         sobre: "instala e atualiza tudo do ecossistema — este programa",
         politica: Politica::Sempre,
         legado: None,
+        gui: None,
     },
 ];
 
@@ -460,6 +497,22 @@ fn atualizar_componente(app: &AppGerido, force: bool) {
                 return;
             }
             aposentar_nome_legado(app);
+            // **A JANELA vem junto, quando ela sai do mesmo repo (ADR-0020).**
+            //
+            // O `cargo build --release` acima já a produziu — os dois `[[bin]]` compilam
+            // juntos —, mas o `build_one` copia UM binário pelo nome. Sem este segundo passo a
+            // janela ficaria no `target/` compartilhado e nunca em `~/.cargo/bin`, e a aba
+            // delegada do hub diria "não instalada" DEPOIS de a pessoa ter instalado.
+            if let Some((nome, dst)) = app.gui_nome_e_destino() {
+                let built = plataforma::shared_target_dir().join("release").join(&nome);
+                match binario::substitui_binario(&built, &dst) {
+                    Ok(()) => println!("✓ {nome}"),
+                    // Não derruba o componente: o headless JÁ está instalado e funcionando, e
+                    // dizer "falhou" sobre isso mandaria a pessoa reinstalar o que já tem. Mas
+                    // também não se cala — a janela ausente tem de ter um motivo na tela.
+                    Err(e) => println!("aviso: o binário está instalado, mas a janela não: {e}"),
+                }
+            }
             println!("✓ {}", tf("up.comp_done", &[("bin", app.bin)]));
         }
         Err(e) => println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", &e)])),
@@ -630,6 +683,7 @@ mod tests {
         let esperado = [
             ("schematize-deployer", "schematizeme/schematize_deployer_rs"),
             ("schematize-optimizer", "schematizeme/schematize_optimizer_rs"),
+            ("schematize-database", "schematizeme/schematize_database_rs"),
             ("schematize-market", "schematizeme/schematize_market_rs"),
         ];
         assert_eq!(APPS_GERIDOS.len(), esperado.len(), "app novo sem entrada nesta asserção");
@@ -641,6 +695,38 @@ mod tests {
             // acha — e, como se viu, que ninguém atualiza.
             assert!(a.bin.starts_with("schematize-"), "{bin} fora do padrão do ADR-0012");
         }
+    }
+
+    /// **App que declara janela TEM de tê-la instalada pelo mesmo `update`.**
+    ///
+    /// O `build_one` copia UM binário pelo nome. Um app com dois `[[bin]]` (ADR-0020) compila
+    /// os dois e só o headless seria copiado — a janela ficaria no `target/` compartilhado, e
+    /// a aba delegada do hub diria "a janela não está instalada" DEPOIS de a pessoa instalar e
+    /// ver o terminal terminar bem. É a forma do defeito que custou o `v0.2.0` do market.
+    ///
+    /// Este teste cobra as três coisas que tornam o campo verdadeiro: o nome da janela é o do
+    /// app mais `-gui`, o destino é o mesmo diretório do headless, e o sufixo de plataforma
+    /// entra nos dois (um `.exe` em um e não no outro instalaria a janela com o nome errado).
+    #[test]
+    fn janela_declarada_e_janela_instalada() {
+        let mut com_janela = 0;
+        for a in APPS_GERIDOS {
+            let Some((nome, dst)) = a.gui_nome_e_destino() else {
+                assert!(a.gui.is_none(), "{} declara janela e não devolve destino", a.bin);
+                continue;
+            };
+            com_janela += 1;
+            assert_eq!(nome, format!("{}-gui{}", a.bin, plataforma::exe_suffix()));
+            assert_eq!(
+                dst.parent(),
+                a.caminho().parent(),
+                "{}: a janela iria para outro diretório que não o do binário",
+                a.bin
+            );
+        }
+        // Self-check: hoje há exatamente um app assim. Zero significaria que o laço não mediu
+        // nada — e um teste que roda zero vezes passa sempre.
+        assert_eq!(com_janela, 1, "mudou o nº de apps com janela no mesmo repo — reveja");
     }
 
     /// **O BUG MEDIDO, lado (b):** o nome do binário na tabela é o `[[bin]]` do Cargo.toml de
