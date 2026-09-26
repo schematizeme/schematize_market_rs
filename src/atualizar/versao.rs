@@ -49,20 +49,54 @@ pub fn latest_version_of(repo: &str) -> Option<String> {
     parse_cargo_version(&rede::get_text(&rede::url_do_cargo_toml(repo))?)
 }
 
-/// **O quê:** versão de um binário instalado (`<bin> --version` → último token que começa com
-/// dígito). `None` se não está instalado ou se não responde.
+/// **O quê:** versão de um binário instalado, a partir da linha do `--version`.
+///
+/// **Onde:** [`installed_version_of`], e os testes — que precisam das duas formas sem ter os
+/// binários instalados na máquina de quem roda a suíte.
+///
+/// **Pega o PRIMEIRO token que parece versão, não o último.** A regra anterior era "o último
+/// token que começa com dígito", ancorada no formato porque o app já trocou de nome uma vez
+/// (Overflow → schematize) e ancorar na posição do nome teria quebrado.
+///
+/// ## O que essa regra não previu, e o preço medido
+///
+/// Os binários da casa passaram a dizer **de qual COMMIT são**: `schematize 0.66.0
+/// (71d5332386cb)`. O último token virou `(71d5332386cb)`, que não começa com dígito — e a
+/// função devolveu `None` para **todo app que reporta procedência**. O `status` dizia "não
+/// instalado" sobre o deployer 0.9.0, o database 0.1.0 e o próprio hub, todos ali, todos
+/// respondendo. Nada dava erro: um `Option` que vira `None` é indistinguível de um binário
+/// ausente, e foi por isso que passou.
+///
+/// A correção mantém o princípio (ancorar no FORMATO, não na posição do nome) e conserta o
+/// lado que envelheceu: o número é o primeiro token com cara de versão, e o que vem depois é
+/// informação adicional que pode crescer de novo.
+pub fn versao_da_linha(linha: &str) -> Option<String> {
+    linha
+        .split_whitespace()
+        .find(|s| parece_versao(s))
+        .map(|s| s.trim_end_matches(&[',', ';'][..]).to_string())
+}
+
+/// **O quê:** este token tem cara de número de versão?
+///
+/// **Onde:** [`versao_da_linha`].
+///
+/// **Começa com dígito E só tem dígito, ponto, hífen ou letra de pré-lançamento.** Só "começa
+/// com dígito" aceitaria `(71d5332386cb)` se um dia o SHA começasse por número — e aí a
+/// correção teria trocado um defeito determinístico por um intermitente, que é pior.
+fn parece_versao(s: &str) -> bool {
+    let s = s.trim_end_matches(&[',', ';'][..]);
+    s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+        && s.contains('.')
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '+')
+}
+
+/// **O quê:** versão de um binário instalado (`<bin> --version`). `None` se não está instalado
+/// ou se não responde.
 ///
 /// **Onde:** [`super::estado_dos_apps`] e o `status`.
-///
-/// **Por que o ÚLTIMO token e não o segundo:** o app já trocou de nome uma vez (Overflow →
-/// schematize). Ancorar na posição do nome quebraria de novo na próxima; ancorar no formato
-/// (o número é o que termina a linha) sobreviveu à troca e sobrevive à seguinte.
 pub fn installed_version_of(bin: &Path) -> Option<String> {
-    let out = util::capture(bin.to_str()?, &["--version"])?;
-    out.split_whitespace()
-        .last()
-        .map(|s| s.to_string())
-        .filter(|s| s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false))
+    versao_da_linha(&util::capture(bin.to_str()?, &["--version"])?)
 }
 
 /// **O quê:** a última versão publicada do app (CLI). **Onde:** o `status`.
@@ -184,6 +218,46 @@ pub fn desatualizado(instalada: Option<&str>, ultima: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// **A PROCEDÊNCIA no `--version` cegava o market inteiro.**
+    ///
+    /// Os binários da casa passaram a dizer de qual COMMIT são. A regra antiga — "o último
+    /// token que começa com dígito" — devolvia `None` para todos eles, e o `status` dizia
+    /// "não instalado" sobre o deployer 0.9.0, o database 0.1.0 e o próprio hub, todos ali,
+    /// todos respondendo. **Nada dava erro:** um `Option` que vira `None` é indistinguível de
+    /// um binário ausente, e foi por isso que passou.
+    #[test]
+    fn a_versao_sobrevive_a_procedencia() {
+        for (linha, esperado) in [
+            ("schematize 0.66.0 (71d5332386cb)", "0.66.0"),
+            ("schematize-database 0.1.0 (3daf49911172)", "0.1.0"),
+            ("schematize-deployer 0.9.0 (ddd9e48282a0)", "0.9.0"),
+            // A forma ANTIGA, sem procedência, continua valendo: há binário instalado assim.
+            ("schematize-market 0.3.0", "0.3.0"),
+            // E a que o app teve quando se chamava Overflow — ancorar no formato e não na
+            // posição do nome é o que sobreviveu à troca, e tem de continuar sobrevivendo.
+            ("overflow 0.12.3", "0.12.3"),
+            ("schematize 1.0.0-rc.2 (abc1234)", "1.0.0-rc.2"),
+            ("schematize 0.1.0 (fonte sem git)", "0.1.0"),
+        ] {
+            assert_eq!(versao_da_linha(linha).as_deref(), Some(esperado), "{linha}");
+        }
+    }
+
+    /// **Um SHA que começa com dígito não pode virar versão.**
+    ///
+    /// Se a correção tivesse sido só "o PRIMEIRO token que começa com dígito", uma linha com
+    /// SHA numérico voltaria a quebrar — e de forma INTERMITENTE, que é pior que o defeito
+    /// determinístico que ela consertou. Exigir o ponto é o que separa `0.1.0` de `71d5332386`.
+    #[test]
+    fn sha_numerico_nao_vira_versao() {
+        assert_eq!(versao_da_linha("schematize 0.1.0 (71533238)").as_deref(), Some("0.1.0"));
+        assert_eq!(versao_da_linha("app 71533238").as_deref(), None, "sem ponto não é versão");
+        assert_eq!(versao_da_linha("").as_deref(), None);
+        assert_eq!(versao_da_linha("sem numero nenhum").as_deref(), None);
+        // Linha que é só o SHA entre parênteses: nada a extrair, e é `None` — não o SHA.
+        assert_eq!(versao_da_linha("(3daf49911172)").as_deref(), None);
+    }
+
     use super::*;
 
     #[test]
