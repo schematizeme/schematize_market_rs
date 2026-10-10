@@ -10,6 +10,7 @@ use super::metodo::Origem;
 use super::metodo::{self, Veredito};
 use super::{alvo, ou_nenhum, Plano, APPS_GERIDOS};
 use crate::nucleo::i18n::{t, tf};
+use crate::nucleo::rede::Causa;
 
 /// **O quê:** imprime o que aconteceria, sem mexer em nada. **Onde:** `install_or_update`
 /// com `--dry-run`.
@@ -80,11 +81,22 @@ fn linha_do_plano(alvo: &str, instalada: Option<&str>, ver: Veredito) -> String 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Versoes {
     /// Último release: `Ok(None)` = o repo não tem release; `Err` = não deu para saber.
-    pub release: Result<Option<String>, String>,
+    pub release: Result<Option<String>, Causa>,
     /// `version` do `Cargo.toml` no main (`None` = não deu para ler).
     pub main: Option<String>,
     pub metodo: Metodo,
     pub origem: Origem,
+}
+
+/// **O quê:** o texto traduzido da causa de não saber o release (`? (rede)`, `? (repositório
+/// não encontrado ...)`). **Onde:** [`linhas_de_versoes`].
+pub fn texto_da_causa(c: Causa) -> String {
+    t(match c {
+        Causa::NotFound => "up.release_not_found",
+        Causa::Network => "up.net_unknown",
+        Causa::RateLimited => "up.release_rate",
+        Causa::Unexpected => "up.release_unexpected",
+    })
 }
 
 /// **O quê:** colhe as [`Versoes`] de `repo` (toca a rede). **Onde:** o `status`.
@@ -114,7 +126,7 @@ pub fn linhas_de_versoes(v: &Versoes) -> Vec<(String, String)> {
     let pub_ = match &v.release {
         Ok(Some(r)) => format!("v{r}"),
         Ok(None) => t("up.st_no_release"),
-        Err(_) => t("up.net_unknown"),
+        Err(c) => texto_da_causa(*c),
     };
     let mut l = vec![(t("up.st_latest"), pub_)];
     let release = v.release.as_ref().ok().and_then(|r| r.as_deref());
@@ -134,9 +146,13 @@ pub fn campos_json(v: &Versoes) -> String {
         None => "null".to_string(),
     };
     let rel = v.release.as_ref().ok().and_then(|r| r.as_deref());
+    let erro = match &v.release {
+        Err(c) => format!("\"{}\"", c.slug()),
+        Ok(_) => "null".to_string(),
+    };
     let origem = if v.origem == Origem::Registro { "recorded" } else { "inferred" };
     format!(
-        "\"latest_release\": {}, \"latest_main\": {}, \"install_method\": \"{}\", \
+        "\"latest_release\": {}, \"latest_release_error\": {erro}, \"latest_main\": {}, \"install_method\": \"{}\", \
          \"install_method_source\": \"{origem}\"",
         txt(rel),
         txt(v.main.as_deref()),
@@ -148,9 +164,9 @@ pub fn campos_json(v: &Versoes) -> String {
 mod tests {
     use super::*;
 
-    fn v(rel: Result<Option<&str>, &str>, main: Option<&str>, m: Metodo, o: Origem) -> Versoes {
+    fn v(rel: Result<Option<&str>, Causa>, main: Option<&str>, m: Metodo, o: Origem) -> Versoes {
         Versoes {
-            release: rel.map(|r| r.map(String::from)).map_err(String::from),
+            release: rel.map(|r| r.map(String::from)),
             main: main.map(String::from),
             metodo: m,
             origem: o,
@@ -206,5 +222,52 @@ mod tests {
             "{j}"
         );
         assert!(j.contains("\"fonte\"") && j.contains("\"recorded\""), "{j}");
+    }
+
+    /// **A MENTIRA que este teste existe para impedir:** o repo `schematize_skills_rs` devolve
+    /// 404 (privado/inexistente) e o `status` dizia `? (rede)` — mandando a pessoa checar a
+    /// internet. Cada causa tem texto próprio, e o JSON leva o slug.
+    #[test]
+    fn cada_causa_tem_texto_proprio_e_o_404_nao_diz_rede() {
+        let txt = |c| texto_da_causa(c);
+        let nf = txt(Causa::NotFound);
+        assert!(nf.starts_with("? (") && nf.ends_with(')'), "{nf}");
+        assert_ne!(nf, t("up.net_unknown"), "404 não pode parecer problema de rede");
+        let todos = [Causa::NotFound, Causa::Network, Causa::RateLimited, Causa::Unexpected];
+        let textos: Vec<String> = todos.iter().map(|c| txt(*c)).collect();
+        for (i, a) in textos.iter().enumerate() {
+            assert!(a.starts_with("? ("), "{a}");
+            for b in &textos[i + 1..] {
+                assert_ne!(a, b, "duas causas com o mesmo texto");
+            }
+        }
+        assert_eq!(txt(Causa::Network), t("up.net_unknown"), "rede mantém o texto de sempre");
+        // E a linha de status usa o texto da causa.
+        let l = linhas_de_versoes(&v(
+            Err(Causa::NotFound),
+            Some("0.1.0"),
+            Metodo::Fonte,
+            Origem::Inferido,
+        ));
+        assert_eq!(l[0].1, nf);
+    }
+
+    #[test]
+    fn json_leva_o_slug_da_causa_e_release_null() {
+        for (c, slug) in [
+            (Causa::NotFound, "not_found"),
+            (Causa::Network, "network"),
+            (Causa::RateLimited, "rate_limited"),
+            (Causa::Unexpected, "unexpected"),
+        ] {
+            let j = campos_json(&v(Err(c), Some("0.1.0"), Metodo::Fonte, Origem::Inferido));
+            assert!(j.contains("\"latest_release\": null"), "{j}");
+            assert!(j.contains(&format!("\"latest_release_error\": \"{slug}\"")), "{j}");
+        }
+        // Sem erro (inclusive "repo sem release"): o campo existe e é null.
+        for rel in [Ok(Some("1.0.0")), Ok(None)] {
+            let j = campos_json(&v(rel, None, Metodo::Fonte, Origem::Registro));
+            assert!(j.contains("\"latest_release_error\": null"), "{j}");
+        }
     }
 }

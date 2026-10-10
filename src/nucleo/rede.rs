@@ -117,6 +117,12 @@ pub fn url_do_cargo_toml(repo: &str) -> String {
 /// cota de 60/h por IP da API (ver [`url_do_cargo_toml`]). Uma falha continua sendo erro
 /// EXPLÍCITO — nunca vira `None` mudo que o chamador confunda com "sem release".
 pub fn url_do_ultimo_release(repo: &str) -> Result<String, String> {
+    url_do_ultimo_release_tipado(repo).map_err(|(_, msg)| msg)
+}
+
+/// **O quê:** [`url_do_ultimo_release`] com a [`Causa`] da falha. **Onde:** o `status`, que
+/// precisa dizer SE foi rede, 404 ou cota — e não um "? (rede)" genérico.
+pub fn url_do_ultimo_release_tipado(repo: &str) -> Result<String, (Causa, String)> {
     let url = format!("https://github.com/{repo}/releases/latest");
     #[cfg(not(windows))]
     let saida = util::capture(
@@ -146,32 +152,88 @@ pub fn url_do_ultimo_release(repo: &str) -> Result<String, String> {
         util::capture("powershell", &["-NoProfile", "-Command", &ps])
     };
     let saida = saida.ok_or_else(|| {
-        format!("não consegui falar com o GitHub para ler o último release de {repo} (rede fora?)")
+        (
+            Causa::Network,
+            format!(
+                "não consegui falar com o GitHub para ler o último release de {repo} (rede fora?)"
+            ),
+        )
     })?;
-    redirect_do_release(repo, &saida)
+    classificar_redirect(repo, &saida)
 }
 
-/// **O quê:** interpreta a saída `"<http_code> <redirect_url>"` do `curl`. Função PURA.
+/// **O quê:** por que a consulta ao GitHub falhou — um SLUG estável, nunca traduzido.
+///
+/// **Onde:** [`classificar_redirect`], [`url_do_ultimo_release_tipado`] e o `status`
+/// (humano e `--json`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Causa {
+    /// HTTP 404: repositório privado ou inexistente. A rede está boa.
+    NotFound,
+    /// Não consegui falar com o GitHub (timeout, sem rede, `000`).
+    Network,
+    /// HTTP 403/429: cota ou bloqueio.
+    RateLimited,
+    /// Qualquer outra resposta.
+    Unexpected,
+}
+
+impl Causa {
+    /// **O quê:** o slug estável do JSON (`not_found`, `network`, `rate_limited`, `unexpected`).
+    /// **Onde:** `status --json`, campo `latest_release_error`.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Causa::NotFound => "not_found",
+            Causa::Network => "network",
+            Causa::RateLimited => "rate_limited",
+            Causa::Unexpected => "unexpected",
+        }
+    }
+}
+
+/// **O quê:** interpreta a saída `"<http_code> <redirect_url>"` do `curl`, com a causa
+/// TIPADA. Função PURA.
+///
+/// **Onde:** [`redirect_do_release`], [`url_do_ultimo_release_tipado`] e os testes.
+pub fn classificar_redirect(repo: &str, saida: &str) -> Result<String, (Causa, String)> {
+    let mut it = saida.trim().splitn(2, ' ');
+    let codigo = it.next().unwrap_or("");
+    let destino = it.next().unwrap_or("").trim();
+    match codigo {
+        "301" | "302" | "303" | "307" | "308" if !destino.is_empty() => Ok(destino.to_string()),
+        "403" | "429" => Err((
+            Causa::RateLimited,
+            format!(
+                "o GitHub recusou a consulta do último release de {repo} (HTTP {codigo}, limite \
+                 de requisições?) — tente de novo em alguns minutos"
+            ),
+        )),
+        "404" => Err((
+            Causa::NotFound,
+            format!("o repositório {repo} não foi encontrado no GitHub (HTTP 404)"),
+        )),
+        "" | "000" => Err((
+            Causa::Network,
+            format!("não consegui falar com o GitHub para ler o último release de {repo}"),
+        )),
+        outro => Err((
+            Causa::Unexpected,
+            format!(
+                "resposta inesperada do GitHub ao ler o último release de {repo} (HTTP {outro})"
+            ),
+        )),
+    }
+}
+
+/// **O quê:** interpreta a saída `"<http_code> <redirect_url>"` do `curl` (só a mensagem).
+/// Função PURA.
 ///
 /// **Onde:** [`url_do_ultimo_release`], e os testes — o `curl` não entra na suíte.
 ///
 /// **Por que separar o código HTTP:** 403/429 do GitHub é cota ou bloqueio, e dizer "sem
 /// release" sobre isso mandaria a pessoa procurar o problema no lugar errado.
 pub fn redirect_do_release(repo: &str, saida: &str) -> Result<String, String> {
-    let mut it = saida.trim().splitn(2, ' ');
-    let codigo = it.next().unwrap_or("");
-    let destino = it.next().unwrap_or("").trim();
-    match codigo {
-        "301" | "302" | "303" | "307" | "308" if !destino.is_empty() => Ok(destino.to_string()),
-        "403" | "429" => Err(format!(
-            "o GitHub recusou a consulta do último release de {repo} (HTTP {codigo}, limite de \
-             requisições?) — tente de novo em alguns minutos"
-        )),
-        "404" => Err(format!("o repositório {repo} não foi encontrado no GitHub (HTTP 404)")),
-        outro => Err(format!(
-            "resposta inesperada do GitHub ao ler o último release de {repo} (HTTP {outro})"
-        )),
-    }
+    classificar_redirect(repo, saida).map_err(|(_, msg)| msg)
 }
 
 /// **O quê:** interpreta o `%{http_code}` do `curl` da sonda de asset. Função PURA.
@@ -223,6 +285,26 @@ pub fn asset_existe(url: &str) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn causa_do_redirect_e_tipada_com_slug_estavel() {
+        let r = "schematizeme/x";
+        let c = |s: &str| classificar_redirect(r, s).unwrap_err().0;
+        assert_eq!(c("404 "), Causa::NotFound);
+        assert_eq!(c("403 "), Causa::RateLimited);
+        assert_eq!(c("429 "), Causa::RateLimited);
+        assert_eq!(c("000 "), Causa::Network);
+        assert_eq!(c(""), Causa::Network);
+        assert_eq!(c("500 "), Causa::Unexpected);
+        assert_eq!(c("302 "), Causa::Unexpected, "redirect sem destino");
+        let ok = "302 https://github.com/a/b/releases/tag/v1.0.0";
+        assert!(classificar_redirect(r, ok).unwrap().ends_with("/tag/v1.0.0"));
+        let slugs: Vec<_> =
+            [Causa::NotFound, Causa::Network, Causa::RateLimited, Causa::Unexpected]
+                .map(Causa::slug)
+                .to_vec();
+        assert_eq!(slugs, ["not_found", "network", "rate_limited", "unexpected"]);
+    }
+
     use super::*;
     use crate::nucleo::plataforma;
 

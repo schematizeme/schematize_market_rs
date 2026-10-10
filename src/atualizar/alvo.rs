@@ -168,8 +168,10 @@ pub fn consultar_publicado(repo: &str) -> Result<Publicado, String> {
 
 /// **O quê:** o último RELEASE publicado de `repo`, para exibir. `Ok(None)` = o repo não tem
 /// release; `Err` = não consegui saber. Toca a rede. **Onde:** o `status`.
-pub fn release_publicada(repo: &str) -> Result<Option<String>, String> {
-    Ok(versao_da_url_de_release(&rede::url_do_ultimo_release(repo)?))
+pub fn release_publicada(repo: &str) -> Result<Option<String>, rede::Causa> {
+    rede::url_do_ultimo_release_tipado(repo)
+        .map(|u| versao_da_url_de_release(&u))
+        .map_err(|(causa, _)| causa)
 }
 
 /// **O quê:** o alvo de `repo` agora: descobre o método, consulta o que o método precisa e
