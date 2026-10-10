@@ -23,6 +23,7 @@
 //! o próprio binário em execução. O market precisa, e por isso o self-update mora em módulo
 //! próprio, com verificação antes da troca — ver [`selfupdate`].
 
+pub mod alvo;
 pub mod binario;
 pub mod fonte;
 pub mod purga;
@@ -281,12 +282,28 @@ pub fn estado_dos_apps() -> Vec<&'static AppGerido> {
 /// **`dry_run` não toca em nada:** imprime o plano e sai. É o que permite alguém ver o que vai
 /// acontecer numa máquina de produção antes de deixar acontecer.
 pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
-    let target = versao::target_version().ok_or_else(|| t("up.no_target"))?;
+    // D7: o alvo é o que está PUBLICADO para este método de instalação. Sem asset, o app não
+    // é tocado e o motivo sobe no fim — mas os componentes seguem (piso 10).
+    let (target, falha_do_alvo) = match alvo::alvo_do_app() {
+        alvo::Alvo::Versao(v) => (Some(v), None),
+        alvo::Alvo::SemAsset { versao } => {
+            (None, Some(alvo::mensagem_sem_binario(plataforma::APP_REPO, &versao)))
+        }
+        alvo::Alvo::Indisponivel(e) => return Err(format!("{} ({e})", t("up.no_target"))),
+    };
     let installed = versao::installed_app_version();
-    let plano = planejar(force, installed.as_deref(), &target, &estado_dos_apps());
+    let mut plano =
+        planejar(force, installed.as_deref(), target.as_deref().unwrap_or(""), &estado_dos_apps());
+    if target.is_none() {
+        plano.app = false;
+    }
 
     if dry_run {
-        imprimir_plano(&plano, installed.as_deref(), &target);
+        match (&target, &falha_do_alvo) {
+            (Some(alvo), _) => imprimir_plano(&plano, installed.as_deref(), alvo),
+            (None, Some(msg)) => println!("{msg}"),
+            (None, None) => {}
+        }
         return Ok(());
     }
 
@@ -301,7 +318,7 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
     // `planejar()` existe para não repetir.
     //
     // O erro NÃO é engolido (piso 4): ele volta ao chamador no fim, e o comando sai != 0.
-    let falha_do_app = if plano.app {
+    let falha_do_app = if let (true, Some(target)) = (plano.app, target.clone()) {
         println!(
             "{}",
             tf(
@@ -310,9 +327,11 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
             )
         );
         atualizar_app(&target).err()
-    } else {
-        println!("{}", tf("up.app_uptodate", &[("target", &target)]));
+    } else if let Some(target) = target.as_deref() {
+        println!("{}", tf("up.app_uptodate", &[("target", target)]));
         None
+    } else {
+        falha_do_alvo
     };
 
     // Cada componente é INDEPENDENTE (piso 10): a falha de um nunca derruba os outros nem o
@@ -381,7 +400,7 @@ fn imprimir_plano(plano: &Plano, instalada: Option<&str>, alvo: &str) {
     );
     for app in &plano.componentes {
         let inst = app.versao_instalada();
-        let ult = versao::latest_version_of(app.repo);
+        let ult = alvo::ultima_publicada(app.repo);
         let muda = versao::desatualizado(inst.as_deref(), ult.as_deref());
         println!(
             "  {:<24} {}",
@@ -427,12 +446,25 @@ fn ou_nenhum(v: Option<&str>) -> String {
 /// asset publicado — que passa a ser o caso normal depois de um release. Separar é o que
 /// garante que os dois passos aconteçam, em qualquer caminho.
 fn atualizar_app(target: &str) -> Result<(), String> {
+    // D7: só quem JÁ compila do fonte cai no fonte. Quem instala por binário e não tem asset
+    // recebe a explicação — nunca um build implícito que pede `sudo` sem terminal.
+    let metodo = alvo::metodo_de(plataforma::APP_REPO);
+
     // 1) CAMINHO RÁPIDO — binário pré-compilado, se houver asset para esta plataforma.
     if let Some((cli_asset, gui_asset)) = plataforma::asset_names() {
         match binario::try_binary(target, &cli_asset, &gui_asset) {
             Ok(true) => {
                 finish(target);
                 return Ok(());
+            }
+            Ok(false) if metodo == alvo::Metodo::Binario => {
+                return Err(alvo::mensagem_sem_binario(plataforma::APP_REPO, target));
+            }
+            Err(e) if metodo == alvo::Metodo::Binario => {
+                return Err(format!(
+                    "não consegui instalar o binário da v{target}: {e}\n  Nada foi alterado; \
+                     o que está instalado continua funcionando."
+                ));
             }
             Ok(false) => println!("→ sem binário compatível para v{target} — compilando do fonte…"),
             Err(e) => println!("→ via binário falhou ({e}) — compilando do fonte…"),
@@ -441,7 +473,8 @@ fn atualizar_app(target: &str) -> Result<(), String> {
         println!("→ sem binário pré-compilado para esta plataforma/arch — compilando do fonte…");
     }
 
-    // 2) CAMINHO CONFIÁVEL — compila do fonte (funciona em qualquer SO com toolchain).
+    // 2) CAMINHO CONFIÁVEL — compila do fonte (funciona em qualquer SO com toolchain). Chega
+    // aqui só quem já era do fonte, ou quem não tem binário nenhum para a plataforma.
     fonte::build_from_source()?;
     finish(target);
     Ok(())
@@ -465,7 +498,16 @@ fn atualizar_componente(app: &AppGerido, force: bool) {
         return; // não instalado — e atualizar não é instalar.
     }
     let instalada = app.versao_instalada();
-    let ultima = versao::latest_version_of(app.repo);
+    let alvo = alvo::alvo_de(app.repo);
+    let ultima = match &alvo {
+        alvo::Alvo::Versao(v) | alvo::Alvo::SemAsset { versao: v } => Some(v.clone()),
+        alvo::Alvo::Indisponivel(_) => None,
+    };
+    // Não saber o alvo NÃO some em silêncio: a causa vai para a tela (piso 4).
+    if let (alvo::Alvo::Indisponivel(e), false) = (&alvo, force) {
+        println!("aviso: {}: {e} — nada foi alterado.", app.bin);
+        return;
+    }
 
     if !force && !versao::desatualizado(instalada.as_deref(), ultima.as_deref()) {
         let v = instalada.as_deref().unwrap_or("?");
@@ -492,7 +534,12 @@ fn atualizar_componente(app: &AppGerido, force: bool) {
     // comparação não), e a política já é invariante travada por teste: existe um e só um
     // componente `Sempre`, e ele é este programa.
     if app.politica == Politica::Sempre {
-        if let Err(e) = selfupdate::atualizar_a_si_mesmo(ultima.as_deref()) {
+        if let alvo::Alvo::SemAsset { versao } = &alvo {
+            println!("{}", alvo::mensagem_sem_binario(app.repo, versao));
+            return;
+        }
+        let metodo = alvo::metodo_de(app.repo);
+        if let Err(e) = selfupdate::atualizar_a_si_mesmo(ultima.as_deref(), metodo) {
             println!("{}", tf("up.self_failed", &[("error", &e)]));
         }
         return;

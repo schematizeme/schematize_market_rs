@@ -88,7 +88,10 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
         // renomeação do ADR-0012, o arquivo tem o nome ANTIGO — e dizer "nenhum" sobre um app
         // que está lá é a pior resposta possível num comando de diagnóstico.
         campo(app.bin.to_string(), versionado(app.versao_instalada()));
-        campo(format!("  {}", t("up.st_latest")), versionado(versao::latest_version_of(app.repo)));
+        campo(
+            format!("  {}", t("up.st_latest")),
+            versionado(atualizar::alvo::ultima_publicada(app.repo)),
+        );
     }
 
     if let Some(p) = versao::read_pin() {
@@ -132,7 +135,7 @@ fn status_json() -> Result<(), String> {
             esc(app.bin),
             esc(app.repo),
             campo(app.versao_instalada()),
-            campo(versao::latest_version_of(app.repo))
+            campo(atualizar::alvo::ultima_publicada(app.repo))
         ));
     }
 

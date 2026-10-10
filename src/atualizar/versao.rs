@@ -37,7 +37,12 @@ pub fn parse_cargo_version(toml: &str) -> Option<String> {
     None
 }
 
-/// **O quê:** última versão publicada de QUALQUER repo da casa. `None` se a rede falhar.
+/// **O quê:** a versão do `Cargo.toml` no `main` de QUALQUER repo da casa. `None` se a rede
+/// falhar.
+///
+/// **Atenção (D7):** isto NÃO é "a última publicada" para quem instala por binário — o `main`
+/// pode estar à frente do último release. Quem decide o alvo é [`super::alvo::alvo_de`], que
+/// só chama esta função para instalações do fonte.
 ///
 /// **Onde:** [`super::planejar`], uma vez por app gerido.
 ///
@@ -99,9 +104,11 @@ pub fn installed_version_of(bin: &Path) -> Option<String> {
     versao_da_linha(&util::capture(bin.to_str()?, &["--version"])?)
 }
 
-/// **O quê:** a última versão publicada do app (CLI). **Onde:** o `status`.
+/// **O quê:** a última versão publicada do app (CLI) PARA ESTA INSTALAÇÃO — o release com
+/// asset para quem instala por binário, o `main` para quem compila ([`super::alvo`], D7).
+/// **Onde:** o `status`.
 pub fn latest_app_version() -> Option<String> {
-    latest_version_of(plataforma::APP_REPO)
+    super::alvo::ultima_publicada(plataforma::APP_REPO)
 }
 
 /// **O quê:** a versão do app instalado nesta máquina. **Onde:** o `status` e o plano.

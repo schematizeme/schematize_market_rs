@@ -107,6 +107,96 @@ pub fn url_do_cargo_toml(repo: &str) -> String {
     format!("https://raw.githubusercontent.com/{repo}/main/Cargo.toml")
 }
 
+/// **O quê:** a URL final do `releases/latest` de um repo — `.../releases/tag/vX.Y.Z` —, lida
+/// do redirecionamento, SEM seguir. `Err` com a causa se a rede falhar ou o GitHub recusar.
+///
+/// **Onde:** [`crate::atualizar::alvo::consultar_publicado`], para saber o último release
+/// PUBLICADO (D7).
+///
+/// **Por que o redirect e não a API:** `github.com/<repo>/releases/latest` é página web, sem a
+/// cota de 60/h por IP da API (ver [`url_do_cargo_toml`]). Uma falha continua sendo erro
+/// EXPLÍCITO — nunca vira `None` mudo que o chamador confunda com "sem release".
+pub fn url_do_ultimo_release(repo: &str) -> Result<String, String> {
+    let url = format!("https://github.com/{repo}/releases/latest");
+    #[cfg(not(windows))]
+    let saida = util::capture(
+        "curl",
+        &[
+            "-sS",
+            "-m",
+            "20",
+            "-H",
+            UA,
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code} %{redirect_url}",
+            &url,
+        ],
+    );
+    #[cfg(windows)]
+    let saida = {
+        let ps = format!(
+            "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; \
+             $r=Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec 20 -Uri '{url}'; \
+             if($r.BaseResponse.ResponseUri){{$u=$r.BaseResponse.ResponseUri.AbsoluteUri}}\
+             else{{$u=$r.BaseResponse.RequestMessage.RequestUri.AbsoluteUri}}; \
+             \"302 $u\""
+        );
+        util::capture("powershell", &["-NoProfile", "-Command", &ps])
+    };
+    let saida = saida.ok_or_else(|| {
+        format!("não consegui falar com o GitHub para ler o último release de {repo} (rede fora?)")
+    })?;
+    redirect_do_release(repo, &saida)
+}
+
+/// **O quê:** interpreta a saída `"<http_code> <redirect_url>"` do `curl`. Função PURA.
+///
+/// **Onde:** [`url_do_ultimo_release`], e os testes — o `curl` não entra na suíte.
+///
+/// **Por que separar o código HTTP:** 403/429 do GitHub é cota ou bloqueio, e dizer "sem
+/// release" sobre isso mandaria a pessoa procurar o problema no lugar errado.
+pub fn redirect_do_release(repo: &str, saida: &str) -> Result<String, String> {
+    let mut it = saida.trim().splitn(2, ' ');
+    let codigo = it.next().unwrap_or("");
+    let destino = it.next().unwrap_or("").trim();
+    match codigo {
+        "301" | "302" | "303" | "307" | "308" if !destino.is_empty() => Ok(destino.to_string()),
+        "403" | "429" => Err(format!(
+            "o GitHub recusou a consulta do último release de {repo} (HTTP {codigo}, limite de \
+             requisições?) — tente de novo em alguns minutos"
+        )),
+        "404" => Err(format!("o repositório {repo} não foi encontrado no GitHub (HTTP 404)")),
+        outro => Err(format!(
+            "resposta inesperada do GitHub ao ler o último release de {repo} (HTTP {outro})"
+        )),
+    }
+}
+
+/// **O quê:** o arquivo em `url` existe e pode ser baixado? Pede só o 1º byte.
+///
+/// **Onde:** [`crate::atualizar::alvo::consultar_publicado`], para saber se o release tem o
+/// asset desta plataforma ANTES de mirar nele.
+///
+/// **Por que `-r 0-0` e não `HEAD`:** o download passa por redirect para um storage assinado
+/// que nem sempre aceita `HEAD`. Um GET de 1 byte testa o caminho que o download real usa.
+pub fn asset_existe(url: &str) -> bool {
+    #[cfg(not(windows))]
+    {
+        util::capture("curl", &["-fsSL", "-m", "20", "-H", UA, "-r", "0-0", "-o", "/dev/null", url])
+            .is_some()
+    }
+    #[cfg(windows)]
+    {
+        let ps = format!(
+            "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; \
+             Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec 20 -Uri '{url}' | Out-Null"
+        );
+        util::capture("powershell", &["-NoProfile", "-Command", &ps]).is_some()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +235,20 @@ mod tests {
                 assert!(u.contains("/download/v1.2.3/"), "{u}");
             }
         }
+    }
+
+    /// A saída do `curl` vira URL de release, ou um erro que diz a causa.
+    #[test]
+    fn redirect_do_release_distingue_cota_de_ausencia() {
+        let r = "schematizeme/schematize-cli";
+        let ok = "302 https://github.com/schematizeme/schematize-cli/releases/tag/v0.65.1";
+        assert!(redirect_do_release(r, ok).unwrap().ends_with("/tag/v0.65.1"));
+        assert!(redirect_do_release(r, "403 ").unwrap_err().contains("limite"));
+        assert!(redirect_do_release(r, "429 ").unwrap_err().contains("429"));
+        assert!(redirect_do_release(r, "404 ").unwrap_err().contains("404"));
+        // 302 sem destino e lixo nunca viram sucesso.
+        assert!(redirect_do_release(r, "302 ").is_err());
+        assert!(redirect_do_release(r, "").is_err());
     }
 
     /// O `Cargo.toml` é lido do RAW, no `main` — nunca da API (cota de 60/h por IP).

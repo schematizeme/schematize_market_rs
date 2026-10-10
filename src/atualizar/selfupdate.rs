@@ -36,6 +36,7 @@
 //! garantida sem `fsync`. Na prática isso significa: o nome aponta para o binário velho ou
 //! para o novo, nunca para um pedaço dos dois. É o que importa aqui.
 
+use super::alvo::Metodo;
 use super::binario;
 use crate::nucleo::{plataforma, rede};
 use std::path::{Path, PathBuf};
@@ -44,9 +45,11 @@ use std::path::{Path, PathBuf};
 ///
 /// **Onde:** [`super::atualizar_componente`], quando o item é o market.
 ///
+/// **`metodo` (D7):** só quem já compila do fonte cai no build quando o asset falha.
+///
 /// **A ordem:** varre temporários órfãos → tenta o asset pré-compilado → cai para o fonte.
 /// A varredura vem primeiro de propósito: ver [`limpar_orfaos`].
-pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>) -> Result<(), String> {
+pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result<(), String> {
     let eu = std::env::current_exe()
         .map_err(|e| format!("não consegui descobrir o caminho deste binário: {e}"))?;
     limpar_orfaos(&eu);
@@ -64,6 +67,13 @@ pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>) -> Result<(), String> {
                 r?;
                 println!("✓ schematize-market atualizado para v{alvo} (binário pré-compilado).");
                 return Ok(());
+            }
+            // D7: quem instalou por binário não cai num build implícito (sudo sem terminal).
+            Err(e) if metodo == Metodo::Binario => {
+                return Err(format!(
+                    "não consegui baixar o market v{alvo} ({e}). Nada foi alterado; o binário \
+                     atual continua valendo. Tente de novo em instantes."
+                ));
             }
             Err(e) => println!("→ asset do market indisponível ({e}) — compilando do fonte…"),
         }
