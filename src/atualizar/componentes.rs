@@ -7,7 +7,8 @@
 //! estas funções para FAZER. Separado de `mod.rs` só por tamanho (teto de 750 linhas), sem
 //! mudança de comportamento.
 
-use super::{alvo, binario, fonte, ou_nenhum, selfupdate, versao, AppGerido, Politica};
+use super::metodo::{self, Veredito};
+use super::{alvo, binario, exibir, fonte, ou_nenhum, selfupdate, versao, AppGerido, Politica};
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::plataforma;
 
@@ -28,6 +29,7 @@ pub(super) fn atualizar_app(target: &str) -> Result<(), String> {
     if let Some((cli_asset, gui_asset)) = plataforma::asset_names() {
         match binario::try_binary(target, &cli_asset, &gui_asset) {
             Ok(true) => {
+                metodo::registrar(plataforma::APP_REPO, alvo::Metodo::Binario);
                 finish(target);
                 return Ok(());
             }
@@ -50,6 +52,7 @@ pub(super) fn atualizar_app(target: &str) -> Result<(), String> {
     // 2) CAMINHO CONFIÁVEL — compila do fonte (funciona em qualquer SO com toolchain). Chega
     // aqui só quem já era do fonte, ou quem não tem binário nenhum para a plataforma.
     fonte::build_from_source()?;
+    metodo::registrar(plataforma::APP_REPO, alvo::Metodo::Fonte);
     finish(target);
     Ok(())
 }
@@ -83,7 +86,15 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
         return;
     }
 
-    if !force && !versao::desatualizado(instalada.as_deref(), ultima.as_deref()) {
+    // D8: binário instalado ACIMA do publicado é mantido e relatado; só o fonte (ou --force)
+    // troca "diferente por diferente".
+    let ver =
+        metodo::veredito(alvo::metodo_de(app.repo), false, instalada.as_deref(), ultima.as_deref());
+    if let (false, Veredito::AFrente, Some(pub_)) = (force, ver, ultima.as_deref()) {
+        exibir::avisar_a_frente(app.bin, instalada.as_deref(), pub_);
+        return;
+    }
+    if !force && ver != Veredito::Atualizar {
         let v = instalada.as_deref().unwrap_or("?");
         println!("{}", tf("up.comp_uptodate", &[("bin", app.bin), ("version", v)]));
         return;
@@ -135,6 +146,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
                 println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", &e)]));
                 return;
             }
+            metodo::registrar(app.repo, alvo::Metodo::Fonte);
             aposentar_nome_legado(app);
             // **A JANELA vem junto, quando ela sai do mesmo repo (ADR-0020).**
             //

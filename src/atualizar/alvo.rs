@@ -120,31 +120,30 @@ pub fn mensagem_sem_binario(repo: &str, versao: &str) -> String {
 
 /// **O quê:** como `repo` foi instalado nesta máquina. Toca o disco.
 ///
-/// **Onde:** [`alvo_de`].
+/// **Onde:** [`alvo_de`] e os pontos de instalação.
 ///
-/// **O sinal, e o que NÃO existe:** não há registro de "instalei por binário". O que há é o
-/// checkout persistente que só o build do fonte cria (`build_src_dir`): com ele, o componente
-/// é do fonte; sem ele, veio de binário (ou é instalação nova, que começa pelo binário). Só o
-/// hub e o market publicam binário; os demais apps só têm o caminho do fonte neste código,
-/// então para eles o `main` é a resposta certa.
+/// **D8:** o método é REGISTRADO pelo market ao instalar ([`super::metodo`]); sem registro, é
+/// inferido pela procedência do binário — um checkout que sobrou NÃO decide. Só o hub e o
+/// market publicam binário; os demais só têm o caminho do fonte neste código.
 pub fn metodo_de(repo: &str) -> Metodo {
-    metodo_pelo_sinal(repo, plataforma::build_src_dir(repo).join(".git").is_dir())
+    metodo_e_origem(repo).0
 }
 
-/// **O quê:** a decisão de [`metodo_de`] sem tocar o disco. Função PURA.
-///
-/// **Onde:** [`metodo_de`] e os testes.
-pub fn metodo_pelo_sinal(repo: &str, tem_checkout: bool) -> Metodo {
-    let publica_binario = repo == plataforma::APP_REPO || repo == plataforma::MARKET_REPO;
-    if publica_binario && !tem_checkout && nome_do_asset(repo).is_some() {
-        Metodo::Binario
-    } else {
-        Metodo::Fonte
-    }
+/// **O quê:** [`metodo_de`] com a origem da resposta (registro ou inferência).
+/// **Onde:** o `status`.
+pub fn metodo_e_origem(repo: &str) -> (Metodo, super::metodo::Origem) {
+    super::metodo::metodo_com_origem(repo, publica_binario(repo))
+}
+
+/// **O quê:** este repo publica binário utilizável nesta plataforma? Pura quanto ao disco.
+/// **Onde:** [`metodo_e_origem`].
+pub fn publica_binario(repo: &str) -> bool {
+    (repo == plataforma::APP_REPO || repo == plataforma::MARKET_REPO)
+        && nome_do_asset(repo).is_some()
 }
 
 /// **O quê:** o nome do asset de `repo` nesta plataforma (o CLI do hub, ou o do market).
-/// `None` se a plataforma não tem binário pronto. **Onde:** [`metodo_pelo_sinal`] e
+/// `None` se a plataforma não tem binário pronto. **Onde:** [`publica_binario`] e
 /// [`consultar_publicado`].
 fn nome_do_asset(repo: &str) -> Option<String> {
     if repo == plataforma::MARKET_REPO {
@@ -165,6 +164,12 @@ pub fn consultar_publicado(repo: &str) -> Result<Publicado, String> {
     })?;
     let tem_asset = rede::asset_existe(&rede::url_de_asset(repo, &format!("v{versao}"), &asset))?;
     Ok(Publicado { versao, tem_asset })
+}
+
+/// **O quê:** o último RELEASE publicado de `repo`, para exibir. `Ok(None)` = o repo não tem
+/// release; `Err` = não consegui saber. Toca a rede. **Onde:** o `status`.
+pub fn release_publicada(repo: &str) -> Result<Option<String>, String> {
+    Ok(versao_da_url_de_release(&rede::url_do_ultimo_release(repo)?))
 }
 
 /// **O quê:** o alvo de `repo` agora: descobre o método, consulta o que o método precisa e
@@ -255,17 +260,13 @@ mod tests {
         assert!(matches!(a, Alvo::Indisponivel(m) if !m.is_empty()));
     }
 
-    /// O sinal de instalação: só hub e market publicam binário, e só sem checkout do fonte.
+    /// Só hub e market publicam binário; os demais só têm o fonte.
     #[test]
-    fn metodo_vem_do_checkout_e_so_hub_e_market_publicam_binario() {
+    fn so_hub_e_market_publicam_binario() {
         use crate::nucleo::plataforma::{APP_REPO, DEPLOYER_REPO, MARKET_REPO};
-        if plataforma::asset_names().is_some() {
-            assert_eq!(metodo_pelo_sinal(APP_REPO, false), Metodo::Binario);
-            assert_eq!(metodo_pelo_sinal(MARKET_REPO, false), Metodo::Binario);
-        }
-        assert_eq!(metodo_pelo_sinal(APP_REPO, true), Metodo::Fonte, "há checkout: é do fonte");
-        // Os demais só têm o caminho do fonte aqui: o `main` é o alvo certo.
-        assert_eq!(metodo_pelo_sinal(DEPLOYER_REPO, false), Metodo::Fonte);
+        assert_eq!(publica_binario(APP_REPO), plataforma::asset_names().is_some());
+        assert_eq!(publica_binario(MARKET_REPO), plataforma::market_asset_name().is_some());
+        assert!(!publica_binario(DEPLOYER_REPO));
     }
 
     /// A URL de redirecionamento do `releases/latest` vira versão sem o `v`.

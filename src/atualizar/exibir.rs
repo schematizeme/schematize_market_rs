@@ -1,0 +1,210 @@
+//! EXIBIR — o que o `update` mostra: o plano (`--dry-run`) e o aviso de "à frente do publicado".
+//!
+//! **O quê:** textos do caminho de atualização, movidos de `mod.rs` só por tamanho (teto de 750
+//! linhas) e estendidos com o veredito do D8.
+//!
+//! **Onde:** [`super::install_or_update`] e [`super::componentes`].
+
+use super::alvo::Metodo;
+use super::metodo::Origem;
+use super::metodo::{self, Veredito};
+use super::{alvo, ou_nenhum, Plano, APPS_GERIDOS};
+use crate::nucleo::i18n::{t, tf};
+
+/// **O quê:** imprime o que aconteceria, sem mexer em nada. **Onde:** `install_or_update`
+/// com `--dry-run`.
+pub(super) fn imprimir_plano(plano: &Plano, instalada: Option<&str>, alvo: &str) {
+    println!("{}\n", t("up.plan_title"));
+    let acao_app = if plano.app {
+        Veredito::Atualizar
+    } else {
+        metodo::veredito_do_app(instalada, Some(alvo))
+    };
+    println!(
+        "  {:<24} {}",
+        t("up.plan_app"),
+        linha_do_plano(&versionado(Some(alvo)), instalada, acao_app)
+    );
+    for app in &plano.componentes {
+        let inst = app.versao_instalada();
+        let ult = alvo::ultima_publicada(app.repo);
+        let ver =
+            metodo::veredito(alvo::metodo_de(app.repo), false, inst.as_deref(), ult.as_deref());
+        println!(
+            "  {:<24} {}",
+            app.bin,
+            linha_do_plano(&versionado(ult.as_deref()), inst.as_deref(), ver)
+        );
+    }
+    // Os que NÃO entraram também aparecem — um plano que só mostra o que faz esconde a
+    // pergunta "e o deployer, por que não?".
+    for app in APPS_GERIDOS.iter().filter(|a| !plano.componentes.iter().any(|c| c.bin == a.bin)) {
+        println!("  {:<24} {}", app.bin, t("up.plan_skipped"));
+    }
+    if plano.vazio() {
+        println!("\n{}", t("up.nothing"));
+    }
+}
+
+/// **O quê:** diz que `bin` está à frente do publicado e que nada foi trocado.
+/// **Onde:** `install_or_update` (app) e `atualizar_componente` (market).
+pub(super) fn avisar_a_frente(bin: &str, instalada: Option<&str>, publicada: &str) {
+    println!(
+        "{}",
+        tf(
+            "up.ahead",
+            &[("bin", bin), ("installed", &ou_nenhum(instalada)), ("published", publicada)]
+        )
+    );
+}
+
+/// **O quê:** uma versão para exibição — `v0.57.0`, ou "? (rede)" quando não se sabe.
+/// **Onde:** [`imprimir_plano`].
+fn versionado(v: Option<&str>) -> String {
+    v.map(|v| format!("v{v}")).unwrap_or_else(|| t("up.net_unknown"))
+}
+
+/// **O quê:** o "alvo X, instalado Y -> ação" de uma linha do plano.
+/// **Onde:** [`imprimir_plano`], para o app e para cada componente.
+fn linha_do_plano(alvo: &str, instalada: Option<&str>, ver: Veredito) -> String {
+    let acao = match ver {
+        Veredito::Atualizar => t("up.act_update"),
+        Veredito::EmDia => t("up.act_uptodate"),
+        Veredito::AFrente => t("up.act_ahead"),
+    };
+    tf("up.plan_line", &[("target", alvo), ("installed", &ou_nenhum(instalada)), ("action", &acao)])
+}
+
+/// **O quê:** o que se sabe sobre as versões de UM app para o `status`.
+/// **Onde:** [`linhas_de_versoes`] e [`campos_json`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Versoes {
+    /// Último release: `Ok(None)` = o repo não tem release; `Err` = não deu para saber.
+    pub release: Result<Option<String>, String>,
+    /// `version` do `Cargo.toml` no main (`None` = não deu para ler).
+    pub main: Option<String>,
+    pub metodo: Metodo,
+    pub origem: Origem,
+}
+
+/// **O quê:** colhe as [`Versoes`] de `repo` (toca a rede). **Onde:** o `status`.
+pub fn versoes_de(repo: &str) -> Versoes {
+    let (metodo, origem) = alvo::metodo_e_origem(repo);
+    Versoes {
+        release: alvo::release_publicada(repo),
+        main: super::versao::latest_version_of(repo),
+        metodo,
+        origem,
+    }
+}
+
+/// **O quê:** o rótulo traduzido do método, com a origem: `binário (registrado)`.
+/// **Onde:** [`linhas_de_versoes`].
+pub fn rotulo_do_metodo(m: Metodo, o: Origem) -> String {
+    let met = t(if m == Metodo::Binario { "up.method_bin" } else { "up.method_src" });
+    let ori = t(if o == Origem::Registro { "up.origin_rec" } else { "up.origin_inf" });
+    format!("{met} ({ori})")
+}
+
+/// **O quê:** as linhas `(rótulo, valor)` do `status` para um app, sem o prefixo de indentação.
+/// Pura (o texto vem do catálogo). **Onde:** o `status`.
+///
+/// `última publicada` é o RELEASE (ou "nenhuma"); `no main` só aparece se diferir dele.
+pub fn linhas_de_versoes(v: &Versoes) -> Vec<(String, String)> {
+    let pub_ = match &v.release {
+        Ok(Some(r)) => format!("v{r}"),
+        Ok(None) => t("up.st_no_release"),
+        Err(_) => t("up.net_unknown"),
+    };
+    let mut l = vec![(t("up.st_latest"), pub_)];
+    let release = v.release.as_ref().ok().and_then(|r| r.as_deref());
+    if let Some(m) = v.main.as_deref().filter(|m| Some(*m) != release) {
+        l.push((t("up.st_main"), format!("v{m}")));
+    }
+    l.push((t("up.st_method"), rotulo_do_metodo(v.metodo, v.origem)));
+    l
+}
+
+/// **O quê:** os campos JSON ESTÁVEIS de versões/método (chaves nunca traduzidas), prontos
+/// para colar num objeto: `"latest_release": ..., "latest_main": ..., "install_method": ...,
+/// "install_method_source": ...`. Pura. **Onde:** `status --json`.
+pub fn campos_json(v: &Versoes) -> String {
+    let txt = |o: Option<&str>| match o {
+        Some(x) => format!("\"{}\"", x.replace('\\', "\\\\").replace('"', "\\\"")),
+        None => "null".to_string(),
+    };
+    let rel = v.release.as_ref().ok().and_then(|r| r.as_deref());
+    let origem = if v.origem == Origem::Registro { "recorded" } else { "inferred" };
+    format!(
+        "\"latest_release\": {}, \"latest_main\": {}, \"install_method\": \"{}\", \
+         \"install_method_source\": \"{origem}\"",
+        txt(rel),
+        txt(v.main.as_deref()),
+        super::metodo::nome(v.metodo)
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn v(rel: Result<Option<&str>, &str>, main: Option<&str>, m: Metodo, o: Origem) -> Versoes {
+        Versoes {
+            release: rel.map(|r| r.map(String::from)).map_err(String::from),
+            main: main.map(String::from),
+            metodo: m,
+            origem: o,
+        }
+    }
+
+    /// O caso do relato: main 0.66.0 e release 0.65.1 -> as DUAS linhas, e o método inferido.
+    #[test]
+    fn status_separa_release_e_main_quando_diferem() {
+        let l = linhas_de_versoes(&v(
+            Ok(Some("0.65.1")),
+            Some("0.66.0"),
+            Metodo::Binario,
+            Origem::Inferido,
+        ));
+        let t_ = |k: &str| t(k);
+        assert_eq!(l[0], (t_("up.st_latest"), "v0.65.1".to_string()));
+        assert_eq!(l[1], (t_("up.st_main"), "v0.66.0".to_string()));
+        assert!(l[2].1.contains(&t_("up.method_bin")) && l[2].1.contains(&t_("up.origin_inf")));
+        assert_eq!(l.len(), 3);
+    }
+
+    #[test]
+    fn main_igual_ao_release_nao_repete_a_linha() {
+        let l = linhas_de_versoes(&v(
+            Ok(Some("0.8.0")),
+            Some("0.8.0"),
+            Metodo::Fonte,
+            Origem::Registro,
+        ));
+        assert_eq!(l.len(), 2);
+        assert!(l[1].1.contains(&t("up.method_src")) && l[1].1.contains(&t("up.origin_rec")));
+    }
+
+    #[test]
+    fn repo_sem_release_diz_nenhuma_e_nao_chuta_o_main() {
+        let l = linhas_de_versoes(&v(Ok(None), Some("0.9.0"), Metodo::Fonte, Origem::Inferido));
+        assert_eq!(l[0].1, t("up.st_no_release"));
+        assert_eq!(l[1].1, "v0.9.0", "o main aparece na sua própria linha");
+    }
+
+    #[test]
+    fn json_tem_os_campos_explicitos() {
+        let j =
+            campos_json(&v(Ok(Some("0.65.1")), Some("0.66.0"), Metodo::Binario, Origem::Inferido));
+        assert!(j.contains("\"latest_release\": \"0.65.1\""), "{j}");
+        assert!(j.contains("\"latest_main\": \"0.66.0\""), "{j}");
+        assert!(j.contains("\"install_method\": \"binario\""), "{j}");
+        assert!(j.contains("\"install_method_source\": \"inferred\""), "{j}");
+        let j = campos_json(&v(Ok(None), None, Metodo::Fonte, Origem::Registro));
+        assert!(
+            j.contains("\"latest_release\": null") && j.contains("\"latest_main\": null"),
+            "{j}"
+        );
+        assert!(j.contains("\"fonte\"") && j.contains("\"recorded\""), "{j}");
+    }
+}

@@ -11,7 +11,7 @@
 //! update | status | pin | unpin | run` passa a ser `schematize-market <o mesmo>` — mesmos
 //! verbos, de propósito: quem tem o comando na mão só troca o nome do programa.
 
-use market::atualizar::{self, versao};
+use market::atualizar::{self, exibir, versao};
 use market::i18n::{t, tf};
 use market::nucleo::plataforma;
 
@@ -76,7 +76,9 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
         },
     );
     campo(t("up.st_app"), versionado(versao::installed_app_version()));
-    campo(t("up.st_latest"), versionado(versao::latest_app_version()));
+    for (r, v) in exibir::linhas_de_versoes(&exibir::versoes_de(plataforma::APP_REPO)) {
+        campo(r, v);
+    }
 
     for app in atualizar::estado_dos_apps() {
         // O próprio market já tem a primeira linha, com a versão compilada neste binário —
@@ -88,10 +90,9 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
         // renomeação do ADR-0012, o arquivo tem o nome ANTIGO — e dizer "nenhum" sobre um app
         // que está lá é a pior resposta possível num comando de diagnóstico.
         campo(app.bin.to_string(), versionado(app.versao_instalada()));
-        campo(
-            format!("  {}", t("up.st_latest")),
-            versionado(atualizar::alvo::ultima_publicada(app.repo)),
-        );
+        for (r, v) in exibir::linhas_de_versoes(&exibir::versoes_de(app.repo)) {
+            campo(format!("  {r}"), v);
+        }
     }
 
     if let Some(p) = versao::read_pin() {
@@ -118,6 +119,15 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
 /// prosa (a plataforma, o "sim/não" do binário pronto) ficam de fora de propósito — quem
 /// consome isto quer dados, e um booleano não precisa de tradução.
 ///
+/// ## D8 · `app_latest` e os campos novos
+///
+/// `app_latest` (e `latest` por app) continuam com o significado de antes — o alvo do método de
+/// instalação —, porque são LIDOS por fora: `schematize_gui_slint/src/marketstatus.rs` (hub) e
+/// `schematize_updater_gui_rs/src/gestor.rs` (janela do market; `has_update` = latest >
+/// installed). Os campos inequívocos são `latest_release` (release publicado, `null` se não há),
+/// `latest_main` (Cargo.toml do main), `install_method` (`binario`|`fonte`) e
+/// `install_method_source` (`recorded`|`inferred`).
+///
 /// **Por que JSON escrito à mão e não `serde_json::to_string`:** o shape é o contrato, e
 /// escrevê-lo explicitamente faz uma mudança nele aparecer no diff. Uma struct com `Serialize`
 /// mudaria o JSON sempre que alguém renomeasse um campo — em silêncio.
@@ -131,11 +141,12 @@ fn status_json() -> Result<(), String> {
     let mut apps = Vec::new();
     for app in atualizar::estado_dos_apps() {
         apps.push(format!(
-            "    {{\"bin\": \"{}\", \"repo\": \"{}\", \"installed\": {}, \"latest\": {}}}",
+            "    {{\"bin\": \"{}\", \"repo\": \"{}\", \"installed\": {}, \"latest\": {}, {}}}",
             esc(app.bin),
             esc(app.repo),
             campo(app.versao_instalada()),
-            campo(atualizar::alvo::ultima_publicada(app.repo))
+            campo(atualizar::alvo::ultima_publicada(app.repo)),
+            exibir::campos_json(&exibir::versoes_de(app.repo))
         ));
     }
 
@@ -145,7 +156,11 @@ fn status_json() -> Result<(), String> {
     println!("  \"arch\": \"{}\",", std::env::consts::ARCH);
     println!("  \"prebuilt\": {},", plataforma::asset_names().is_some());
     println!("  \"app_installed\": {},", campo(versao::installed_app_version()));
+    // `app_latest` MANTÉM o significado de antes do D8 (consumido por fora — ver o doc): o alvo
+    // do método de instalação (release p/ binário, main p/ fonte). Os campos novos e inequívocos
+    // vêm ao lado.
     println!("  \"app_latest\": {},", campo(versao::latest_app_version()));
+    println!("  {},", exibir::campos_json(&exibir::versoes_de(plataforma::APP_REPO)));
     println!("  \"pin\": {},", campo(versao::read_pin()));
     println!("  \"install_dir\": \"{}\",", esc(&plataforma::install_dir().display().to_string()));
     println!("  \"apps\": [");
@@ -206,6 +221,11 @@ mod tests {
                 "a chave `{chave}` sumiu de cada app no `status --json`"
             );
         }
+
+        // Os campos do D8 (`latest_release`, `latest_main`, `install_method`, …) vêm de
+        // `exibir::campos_json`, travado por teste próprio; aqui só se exige que estejam ligados,
+        // no topo e em cada app.
+        assert_eq!(corpo.matches("exibir::campos_json").count(), 2, "campos do D8 desligados");
 
         // E as chaves NUNCA passam pelo catálogo: se alguém envolver uma em `t()`/`tf()`, o
         // JSON volta a mudar de forma por idioma — que é exatamente o bug que este comando

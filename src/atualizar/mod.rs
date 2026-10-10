@@ -26,7 +26,9 @@
 pub mod alvo;
 pub mod binario;
 mod componentes;
+pub mod exibir;
 pub mod fonte;
+pub mod metodo;
 pub mod purga;
 pub mod selfupdate;
 pub mod versao;
@@ -34,6 +36,7 @@ pub mod versao;
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::plataforma;
 use componentes::{atualizar_app, atualizar_componente};
+use exibir::imprimir_plano;
 use std::path::PathBuf;
 
 /// **O quê:** quando um componente entra num `update`.
@@ -296,7 +299,11 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
     let installed = versao::installed_app_version();
     let mut plano =
         planejar(force, installed.as_deref(), target.as_deref().unwrap_or(""), &estado_dos_apps());
-    if target.is_none() {
+    // D8: binário instalado ACIMA do publicado fica como está (só o pin ou --force rebaixam).
+    let a_frente = !force
+        && metodo::veredito_do_app(installed.as_deref(), target.as_deref())
+            == metodo::Veredito::AFrente;
+    if target.is_none() || a_frente {
         plano.app = false;
     }
 
@@ -329,6 +336,9 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
             )
         );
         atualizar_app(&target).err()
+    } else if let (true, Some(target)) = (a_frente, target.as_deref()) {
+        exibir::avisar_a_frente("schematize", installed.as_deref(), target);
+        None
     } else if let Some(target) = target.as_deref() {
         println!("{}", tf("up.app_uptodate", &[("target", target)]));
         None
@@ -389,48 +399,6 @@ fn aposentar_o_updater() {
             }
         }
     }
-}
-
-/// **O quê:** imprime o que aconteceria, sem mexer em nada. **Onde:** [`install_or_update`]
-/// com `--dry-run`.
-fn imprimir_plano(plano: &Plano, instalada: Option<&str>, alvo: &str) {
-    println!("{}\n", t("up.plan_title"));
-    println!(
-        "  {:<24} {}",
-        t("up.plan_app"),
-        linha_do_plano(&versionado(Some(alvo)), instalada, plano.app)
-    );
-    for app in &plano.componentes {
-        let inst = app.versao_instalada();
-        let ult = alvo::ultima_publicada(app.repo);
-        let muda = versao::desatualizado(inst.as_deref(), ult.as_deref());
-        println!(
-            "  {:<24} {}",
-            app.bin,
-            linha_do_plano(&versionado(ult.as_deref()), inst.as_deref(), muda)
-        );
-    }
-    // Os que NÃO entraram também aparecem — um plano que só mostra o que faz esconde a
-    // pergunta "e o deployer, por que não?".
-    for app in APPS_GERIDOS.iter().filter(|a| !plano.componentes.iter().any(|c| c.bin == a.bin)) {
-        println!("  {:<24} {}", app.bin, t("up.plan_skipped"));
-    }
-    if plano.vazio() {
-        println!("\n{}", t("up.nothing"));
-    }
-}
-
-/// **O quê:** uma versão para exibição — `v0.57.0`, ou "? (rede)" quando não se sabe.
-/// **Onde:** [`imprimir_plano`].
-fn versionado(v: Option<&str>) -> String {
-    v.map(|v| format!("v{v}")).unwrap_or_else(|| t("up.net_unknown"))
-}
-
-/// **O quê:** o "alvo X, instalado Y -> ação" de uma linha do plano.
-/// **Onde:** [`imprimir_plano`], para o app e para cada componente.
-fn linha_do_plano(alvo: &str, instalada: Option<&str>, muda: bool) -> String {
-    let acao = if muda { t("up.act_update") } else { t("up.act_uptodate") };
-    tf("up.plan_line", &[("target", alvo), ("installed", &ou_nenhum(instalada)), ("action", &acao)])
 }
 
 /// **O quê:** a versão instalada, ou a palavra traduzida para "nenhum".

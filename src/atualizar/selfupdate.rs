@@ -65,6 +65,7 @@ pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result
                 let r = trocar_com_rede(&cand, &eu, alvo);
                 let _ = std::fs::remove_file(&cand);
                 r?;
+                super::metodo::registrar(plataforma::MARKET_REPO, Metodo::Binario);
                 println!("✓ schematize-market atualizado para v{alvo} (binário pré-compilado).");
                 return Ok(());
             }
@@ -124,6 +125,7 @@ fn compilar_e_trocar(eu: &Path, alvo: &str) -> Result<(), String> {
     .and_then(|()| trocar_com_rede(&cand, eu, alvo));
     let _ = std::fs::remove_file(&cand);
     r?;
+    super::metodo::registrar(plataforma::MARKET_REPO, Metodo::Fonte);
     println!("✓ schematize-market atualizado para v{alvo} (compilado do fonte).");
     Ok(())
 }

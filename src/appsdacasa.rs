@@ -189,7 +189,9 @@ pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
         None,
         &app.bin_name(),
         &app.caminho(),
-    )
+    )?;
+    crate::atualizar::metodo::registrar(app.repo, crate::atualizar::alvo::Metodo::Fonte);
+    Ok(())
 }
 
 /// **O quê:** põe o app recém-instalado no menu de aplicativos. Best-effort, mas **nunca
