@@ -163,7 +163,7 @@ pub fn consultar_publicado(repo: &str) -> Result<Publicado, String> {
     let versao = versao_da_url_de_release(&url).ok_or_else(|| {
         format!("{repo} ainda não tem nenhum release publicado (o GitHub apontou para {url})")
     })?;
-    let tem_asset = rede::asset_existe(&rede::url_de_asset(repo, &format!("v{versao}"), &asset));
+    let tem_asset = rede::asset_existe(&rede::url_de_asset(repo, &format!("v{versao}"), &asset))?;
     Ok(Publicado { versao, tem_asset })
 }
 

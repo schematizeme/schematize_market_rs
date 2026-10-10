@@ -174,27 +174,51 @@ pub fn redirect_do_release(repo: &str, saida: &str) -> Result<String, String> {
     }
 }
 
-/// **O quê:** o arquivo em `url` existe e pode ser baixado? Pede só o 1º byte.
+/// **O quê:** interpreta o `%{http_code}` do `curl` da sonda de asset. Função PURA.
+///
+/// **Onde:** [`asset_existe`], e os testes.
+///
+/// **Três estados, não dois:** `200`/`206` = existe; `404` = não existe (a ÚNICA ausência
+/// confirmada); qualquer outra coisa (`000` timeout/rede, `403`/`429` cota, `5xx`, vazio) é
+/// falha da SONDA — e dizer "sem binário" sobre isso mentiria sobre a causa.
+pub fn classificar_http_do_asset(saida: &str) -> Result<bool, String> {
+    match saida.trim() {
+        "200" | "206" => Ok(true),
+        "404" => Ok(false),
+        "" | "000" => Err("não consegui falar com o GitHub para conferir o binário da \
+                           release (rede fora ou tempo esgotado)"
+            .to_string()),
+        "403" | "429" => Err("o GitHub recusou a conferência do binário da release (HTTP \
+                              403/429, limite de requisições?) — tente em alguns minutos"
+            .to_string()),
+        outro => Err(format!("resposta inesperada do GitHub ao conferir o binário (HTTP {outro})")),
+    }
+}
+
+/// **O quê:** o arquivo em `url` existe? Pede só o 1º byte. `Ok(false)` só para 404 confirmado.
 ///
 /// **Onde:** [`crate::atualizar::alvo::consultar_publicado`], para saber se o release tem o
 /// asset desta plataforma ANTES de mirar nele.
 ///
 /// **Por que `-r 0-0` e não `HEAD`:** o download passa por redirect para um storage assinado
-/// que nem sempre aceita `HEAD`. Um GET de 1 byte testa o caminho que o download real usa.
-pub fn asset_existe(url: &str) -> bool {
+/// que nem sempre aceita `HEAD`. **Sem `-f`**, como [`url_do_ultimo_release`]: o código HTTP
+/// vem por `-w` e a sonda não escreve nada no terminal da pessoa.
+pub fn asset_existe(url: &str) -> Result<bool, String> {
     #[cfg(not(windows))]
-    {
-        util::capture("curl", &["-fsSL", "-m", "20", "-H", UA, "-r", "0-0", "-o", "/dev/null", url])
-            .is_some()
-    }
+    let saida = util::capture(
+        "curl",
+        &["-sSL", "-m", "20", "-H", UA, "-r", "0-0", "-o", "/dev/null", "-w", "%{http_code}", url],
+    );
     #[cfg(windows)]
-    {
+    let saida = {
         let ps = format!(
             "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; \
-             Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec 20 -Uri '{url}' | Out-Null"
+             try {{ (Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec 20 -Uri '{url}').StatusCode }} \
+             catch {{ if($_.Exception.Response){{[int]$_.Exception.Response.StatusCode}}else{{0}} }}"
         );
-        util::capture("powershell", &["-NoProfile", "-Command", &ps]).is_some()
-    }
+        util::capture("powershell", &["-NoProfile", "-Command", &ps])
+    };
+    classificar_http_do_asset(saida.as_deref().unwrap_or(""))
 }
 
 #[cfg(test)]
@@ -235,6 +259,18 @@ mod tests {
                 assert!(u.contains("/download/v1.2.3/"), "{u}");
             }
         }
+    }
+
+    /// A sonda de asset tem TRÊS estados: só o 404 confirma ausência.
+    #[test]
+    fn sonda_de_asset_so_afirma_ausencia_com_404() {
+        assert_eq!(classificar_http_do_asset("200"), Ok(true));
+        assert_eq!(classificar_http_do_asset("206\n"), Ok(true));
+        assert_eq!(classificar_http_do_asset("404"), Ok(false));
+        assert!(classificar_http_do_asset("403").unwrap_err().contains("403"));
+        assert!(classificar_http_do_asset("000").unwrap_err().contains("rede"));
+        assert!(classificar_http_do_asset("").unwrap_err().contains("rede"));
+        assert!(classificar_http_do_asset("503").unwrap_err().contains("503"));
     }
 
     /// A saída do `curl` vira URL de release, ou um erro que diz a causa.
