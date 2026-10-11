@@ -49,7 +49,7 @@
   "up.app_uptodate": "Aplikasi sudah pada versi target (v{target}).",
   "up.comp_done": "{bin} diperbarui.",
   "up.comp_failed": "peringatan: build {bin} gagal (opsional, dilanjutkan): {error}",
-  "up.comp_target": "{bin}: target v{target} (terpasang: {installed}). Sedang dibangun...",
+  "up.comp_target": "{bin}: target v{target} (terpasang: {installed}).",
   "up.comp_uptodate": "{bin} sudah pada versi target (v{version}).",
   "up.installed_at": "schematize v{version} terpasang di {dir}.",
   "up.method_bad": "peringatan: catatan metode instalasi tidak terbaca ({error}) - disimpulkan dari biner.",

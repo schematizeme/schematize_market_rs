@@ -49,7 +49,7 @@
   "up.app_uptodate": "التطبيق على الإصدار الهدف بالفعل (v{target}).",
   "up.comp_done": "تم تحديث {bin}.",
   "up.comp_failed": "تحذير: فشل بناء {bin} (اختياري، سنكمل): {error}",
-  "up.comp_target": "{bin}: الهدف v{target} (المثبَّت: {installed}). جارٍ البناء...",
+  "up.comp_target": "{bin}: الهدف v{target} (المثبَّت: {installed}).",
   "up.comp_uptodate": "{bin} على الإصدار الهدف بالفعل (v{version}).",
   "up.installed_at": "تم تثبيت schematize v{version} في {dir}.",
   "up.method_bad": "تحذير: سجل طريقة التثبيت غير قابل للقراءة ({error}) - يتم الاستنتاج من الملف الثنائي.",

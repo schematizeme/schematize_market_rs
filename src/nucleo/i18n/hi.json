@@ -49,7 +49,7 @@
   "up.app_uptodate": "ऐप पहले से ही लक्ष्य संस्करण पर है (v{target})।",
   "up.comp_done": "{bin} अपडेट हो गया।",
   "up.comp_failed": "चेतावनी: {bin} का बिल्ड विफल रहा (वैकल्पिक, आगे बढ़ रहे हैं): {error}",
-  "up.comp_target": "{bin}: लक्ष्य v{target} (स्थापित: {installed})। संकलित किया जा रहा है...",
+  "up.comp_target": "{bin}: लक्ष्य v{target} (स्थापित: {installed}).",
   "up.comp_uptodate": "{bin} पहले से ही लक्ष्य संस्करण पर है (v{version})।",
   "up.installed_at": "schematize v{version} {dir} में स्थापित हुआ।",
   "up.method_bad": "चेतावनी: इंस्टॉल के तरीके का रिकॉर्ड पढ़ा नहीं जा सका ({error}) - बाइनरी से अनुमान लगाया जा रहा है।",

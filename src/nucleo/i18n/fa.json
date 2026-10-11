@@ -49,7 +49,7 @@
   "up.app_uptodate": "برنامه هم‌اکنون روی نسخهٔ هدف است (v{target}).",
   "up.comp_done": "{bin} به‌روزرسانی شد.",
   "up.comp_failed": "هشدار: ساخت {bin} ناموفق بود (اختیاری، ادامه می‌دهیم): {error}",
-  "up.comp_target": "{bin}: هدف v{target} (نصب‌شده: {installed}). در حال ساخت...",
+  "up.comp_target": "{bin}: هدف v{target} (نصب‌شده: {installed}).",
   "up.comp_uptodate": "{bin} هم‌اکنون روی نسخهٔ هدف است (v{version}).",
   "up.installed_at": "schematize v{version} در {dir} نصب شد.",
   "up.method_bad": "هشدار: رکورد روش نصب خوانده نشد ({error}) - از روی باینری استنباط می‌شود.",

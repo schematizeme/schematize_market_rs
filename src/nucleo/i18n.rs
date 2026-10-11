@@ -235,4 +235,22 @@ mod tests_paridade {
             }
         }
     }
+
+    /// **O quê:** `up.comp_target` NÃO afirma o método de instalação (compilar/construir).
+    /// **Onde:** a linha impressa antes de atualizar um componente. Era "…Compilando..." mesmo
+    /// quando o caminho era o binário pré-compilado (visto no self-update do market: dizia
+    /// compilar e baixava o asset). Quem sabe o método é o passo seguinte, que o imprime.
+    #[test]
+    fn comp_target_nao_afirma_o_metodo() {
+        for (nome, bruto) in locales() {
+            let m = pares(&bruto).into_iter().collect::<std::collections::BTreeMap<_, _>>();
+            let v = &m["up.comp_target"];
+            let fim = v.rfind([')', '）']).expect("fecha o parêntese do instalado");
+            let resto = v[fim..].trim_start_matches([')', '）']).trim();
+            assert!(
+                resto.trim_matches(['.', '。', '…']).is_empty(),
+                "{nome}.json / up.comp_target diz o método depois do alvo: {v:?}"
+            );
+        }
+    }
 }

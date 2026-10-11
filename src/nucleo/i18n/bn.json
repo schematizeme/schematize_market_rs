@@ -49,7 +49,7 @@
   "up.app_uptodate": "অ্যাপ ইতিমধ্যেই লক্ষ্য সংস্করণে আছে (v{target})।",
   "up.comp_done": "{bin} আপডেট হয়েছে।",
   "up.comp_failed": "সতর্কতা: {bin} বিল্ড ব্যর্থ হয়েছে (ঐচ্ছিক, এগিয়ে যাচ্ছি): {error}",
-  "up.comp_target": "{bin}: লক্ষ্য v{target} (ইনস্টল করা: {installed})। কম্পাইল করা হচ্ছে...",
+  "up.comp_target": "{bin}: লক্ষ্য v{target} (ইনস্টল করা: {installed}).",
   "up.comp_uptodate": "{bin} ইতিমধ্যেই লক্ষ্য সংস্করণে আছে (v{version})।",
   "up.installed_at": "schematize v{version} {dir}-এ ইনস্টল হয়েছে।",
   "up.method_bad": "সতর্কতা: ইনস্টল পদ্ধতির রেকর্ড পড়া যায়নি ({error}) - বাইনারি থেকে অনুমান করা হচ্ছে।",

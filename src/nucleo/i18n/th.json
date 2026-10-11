@@ -49,7 +49,7 @@
   "up.app_uptodate": "แอปอยู่ที่รุ่นเป้าหมายแล้ว (v{target})",
   "up.comp_done": "อัปเดต {bin} แล้ว",
   "up.comp_failed": "คำเตือน: การบิลด์ {bin} ล้มเหลว (เป็นตัวเลือก จึงไปต่อ): {error}",
-  "up.comp_target": "{bin}: เป้าหมาย v{target} (ติดตั้งแล้ว: {installed}) กำลังคอมไพล์...",
+  "up.comp_target": "{bin}: เป้าหมาย v{target} (ติดตั้งแล้ว: {installed}).",
   "up.comp_uptodate": "{bin} อยู่ที่รุ่นเป้าหมายแล้ว (v{version})",
   "up.installed_at": "ติดตั้ง schematize v{version} ไว้ที่ {dir} แล้ว",
   "up.method_bad": "คำเตือน: อ่านบันทึกวิธีติดตั้งไม่ได้ ({error}) - อนุมานจากไบนารี",

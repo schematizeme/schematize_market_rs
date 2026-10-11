@@ -49,7 +49,7 @@
   "up.app_uptodate": "Aplikacja jest już w wersji docelowej (v{target}).",
   "up.comp_done": "{bin} zaktualizowano.",
   "up.comp_failed": "ostrzeżenie: budowanie {bin} nie powiodło się (opcjonalne, idziemy dalej): {error}",
-  "up.comp_target": "{bin}: cel v{target} (zainstalowano: {installed}). Kompiluję...",
+  "up.comp_target": "{bin}: cel v{target} (zainstalowano: {installed}).",
   "up.comp_uptodate": "{bin} jest już w wersji docelowej (v{version}).",
   "up.installed_at": "schematize v{version} zainstalowano w {dir}.",
   "up.method_bad": "ostrzeżenie: zapis metody instalacji nieczytelny ({error}) - wnioskowanie na podstawie pliku binarnego.",

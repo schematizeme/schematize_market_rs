@@ -49,7 +49,7 @@
   "up.app_uptodate": "Приложение уже целевой версии (v{target}).",
   "up.comp_done": "{bin} обновлён.",
   "up.comp_failed": "предупреждение: сборка {bin} не удалась (необязательно, продолжаем): {error}",
-  "up.comp_target": "{bin}: цель v{target} (установлено: {installed}). Сборка...",
+  "up.comp_target": "{bin}: цель v{target} (установлено: {installed}).",
   "up.comp_uptodate": "{bin} уже целевой версии (v{version}).",
   "up.installed_at": "schematize v{version} установлен в {dir}.",
   "up.method_bad": "предупреждение: запись о способе установки не читается ({error}) - определяем по бинарному файлу.",

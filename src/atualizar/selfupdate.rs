@@ -60,6 +60,7 @@ pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result
     )?;
 
     if let Some(asset) = plataforma::market_asset_name() {
+        println!("→ baixando o binário pré-compilado do market v{alvo}…");
         match baixar_candidato(&asset, alvo) {
             Ok(cand) => {
                 let r = trocar_com_rede(&cand, &eu, alvo);

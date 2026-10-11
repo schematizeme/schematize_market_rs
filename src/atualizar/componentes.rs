@@ -234,6 +234,7 @@ fn atualizar_por_release(app: &AppGerido, versao: &str) {
         );
         return;
     };
+    println!("→ baixando o binário pré-compilado de {} v{versao}…", app.bin);
     let dest = release::destino_do_app(app);
     let r = release::baixar_e_instalar(&release::RedeReal, app.repo, versao, &assets, &dest);
     match &r {

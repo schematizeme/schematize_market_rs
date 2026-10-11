@@ -49,7 +49,7 @@
   "up.app_uptodate": "L'app est déjà à la version cible (v{target}).",
   "up.comp_done": "{bin} mis à jour.",
   "up.comp_failed": "avertissement : la compilation de {bin} a échoué (optionnel, on continue) : {error}",
-  "up.comp_target": "{bin} : cible v{target} (installé : {installed}). Compilation...",
+  "up.comp_target": "{bin} : cible v{target} (installé : {installed}).",
   "up.comp_uptodate": "{bin} est déjà à la version cible (v{version}).",
   "up.installed_at": "schematize v{version} installé dans {dir}.",
   "up.method_bad": "avertissement : enregistrement de la méthode d'installation illisible ({error}) - déduction à partir du binaire.",

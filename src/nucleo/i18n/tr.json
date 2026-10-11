@@ -49,7 +49,7 @@
   "up.app_uptodate": "Uygulama zaten hedef sürümde (v{target}).",
   "up.comp_done": "{bin} güncellendi.",
   "up.comp_failed": "uyarı: {bin} derlemesi başarısız (isteğe bağlı, devam ediliyor): {error}",
-  "up.comp_target": "{bin}: hedef v{target} (kurulu: {installed}). Derleniyor...",
+  "up.comp_target": "{bin}: hedef v{target} (kurulu: {installed}).",
   "up.comp_uptodate": "{bin} zaten hedef sürümde (v{version}).",
   "up.installed_at": "schematize v{version} şuraya kuruldu: {dir}.",
   "up.method_bad": "uyarı: kurulum yöntemi kaydı okunamadı ({error}) - ikili dosyadan çıkarılıyor.",

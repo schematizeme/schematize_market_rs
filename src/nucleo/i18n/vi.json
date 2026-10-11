@@ -49,7 +49,7 @@
   "up.app_uptodate": "Ứng dụng đã ở phiên bản mục tiêu (v{target}).",
   "up.comp_done": "{bin} đã được cập nhật.",
   "up.comp_failed": "cảnh báo: biên dịch {bin} thất bại (tùy chọn, tiếp tục): {error}",
-  "up.comp_target": "{bin}: mục tiêu v{target} (đã cài: {installed}). Đang biên dịch...",
+  "up.comp_target": "{bin}: mục tiêu v{target} (đã cài: {installed}).",
   "up.comp_uptodate": "{bin} đã ở phiên bản mục tiêu (v{version}).",
   "up.installed_at": "schematize v{version} đã cài tại {dir}.",
   "up.method_bad": "cảnh báo: không đọc được bản ghi phương thức cài đặt ({error}) - suy ra từ tệp nhị phân.",

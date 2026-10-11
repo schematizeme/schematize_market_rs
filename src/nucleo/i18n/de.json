@@ -49,7 +49,7 @@
   "up.app_uptodate": "Die App ist bereits auf der Zielversion (v{target}).",
   "up.comp_done": "{bin} aktualisiert.",
   "up.comp_failed": "Warnung: Build von {bin} fehlgeschlagen (optional, es geht weiter): {error}",
-  "up.comp_target": "{bin}: Ziel v{target} (installiert: {installed}). Wird gebaut...",
+  "up.comp_target": "{bin}: Ziel v{target} (installiert: {installed}).",
   "up.comp_uptodate": "{bin} ist bereits auf der Zielversion (v{version}).",
   "up.installed_at": "schematize v{version} installiert in {dir}.",
   "up.method_bad": "Warnung: Eintrag zur Installationsmethode nicht lesbar ({error}) - wird aus der Binärdatei abgeleitet.",

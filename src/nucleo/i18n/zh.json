@@ -49,7 +49,7 @@
   "up.app_uptodate": "应用已是目标版本（v{target}）。",
   "up.comp_done": "{bin} 已更新。",
   "up.comp_failed": "警告：{bin} 构建失败（可选，继续）：{error}",
-  "up.comp_target": "{bin}：目标 v{target}（已安装：{installed}）。正在编译……",
+  "up.comp_target": "{bin}：目标 v{target}（已安装：{installed}）。",
   "up.comp_uptodate": "{bin} 已是目标版本（v{version}）。",
   "up.installed_at": "schematize v{version} 已安装到 {dir}。",
   "up.method_bad": "警告：安装方式记录无法读取（{error}）- 根据二进制文件推断。",

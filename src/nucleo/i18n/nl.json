@@ -49,7 +49,7 @@
   "up.app_uptodate": "De app heeft al de doelversie (v{target}).",
   "up.comp_done": "{bin} bijgewerkt.",
   "up.comp_failed": "waarschuwing: build van {bin} mislukt (optioneel, we gaan door): {error}",
-  "up.comp_target": "{bin}: doel v{target} (geïnstalleerd: {installed}). Bezig met bouwen...",
+  "up.comp_target": "{bin}: doel v{target} (geïnstalleerd: {installed}).",
   "up.comp_uptodate": "{bin} heeft al de doelversie (v{version}).",
   "up.installed_at": "schematize v{version} geïnstalleerd in {dir}.",
   "up.method_bad": "waarschuwing: registratie van de installatiemethode onleesbaar ({error}) - afgeleid uit het binaire bestand.",

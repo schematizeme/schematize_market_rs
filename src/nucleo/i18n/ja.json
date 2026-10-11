@@ -49,7 +49,7 @@
   "up.app_uptodate": "アプリはすでに目標バージョンです（v{target}）。",
   "up.comp_done": "{bin} を更新しました。",
   "up.comp_failed": "警告: {bin} のビルドに失敗しました（任意のため続行）: {error}",
-  "up.comp_target": "{bin}: 目標 v{target}（インストール済み: {installed}）。ビルド中...",
+  "up.comp_target": "{bin}: 目標 v{target}（インストール済み: {installed}）。",
   "up.comp_uptodate": "{bin} はすでに目標バージョンです（v{version}）。",
   "up.installed_at": "schematize v{version} を {dir} にインストールしました。",
   "up.method_bad": "警告: インストール方法の記録を読み取れません（{error}）- バイナリから推定します。",

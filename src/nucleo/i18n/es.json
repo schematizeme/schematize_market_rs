@@ -49,7 +49,7 @@
   "up.app_uptodate": "El app ya está en la versión objetivo (v{target}).",
   "up.comp_done": "{bin} actualizado.",
   "up.comp_failed": "aviso: la compilación de {bin} falló (opcional, seguimos): {error}",
-  "up.comp_target": "{bin}: objetivo v{target} (instalado: {installed}). Compilando...",
+  "up.comp_target": "{bin}: objetivo v{target} (instalado: {installed}).",
   "up.comp_uptodate": "{bin} ya está en la versión objetivo (v{version}).",
   "up.installed_at": "schematize v{version} instalado en {dir}.",
   "up.method_bad": "aviso: registro del método de instalación ilegible ({error}) - se infiere por el binario.",

@@ -49,7 +49,7 @@
   "up.app_uptodate": "The app is already at the target version (v{target}).",
   "up.comp_done": "{bin} updated.",
   "up.comp_failed": "warning: build of {bin} failed (optional, moving on): {error}",
-  "up.comp_target": "{bin}: target v{target} (installed: {installed}). Building...",
+  "up.comp_target": "{bin}: target v{target} (installed: {installed}).",
   "up.comp_uptodate": "{bin} is already at the target version (v{version}).",
   "up.installed_at": "schematize v{version} installed in {dir}.",
   "up.method_bad": "warning: install-method record unreadable ({error}) - inferring from the binary.",
