@@ -7,6 +7,7 @@
 //! estas funções para FAZER. Separado de `mod.rs` só por tamanho (teto de 750 linhas), sem
 //! mudança de comportamento.
 
+use super::divergencia::{self, Decisao};
 use super::metodo::{self, Veredito};
 use super::{
     alvo, binario, exibir, fonte, limpeza, ou_nenhum, release, selfupdate, versao, AppGerido,
@@ -93,6 +94,31 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
     // troca "diferente por diferente".
     let ver =
         metodo::veredito(alvo::metodo_de(app.repo), false, instalada.as_deref(), ultima.as_deref());
+    // D12: a MESMA versão não basta — se o commit do binário não é o do release, é um build
+    // de desenvolvimento com o número do release e é trocado (salvo `fonte`). Só quando há
+    // asset (`Alvo::Versao`): sem binário publicado não há com o que trocar.
+    let build = match (&alvo, force) {
+        (alvo::Alvo::Versao(_), false) => {
+            divergencia::checar_app(app, instalada.as_deref(), ultima.as_deref())
+        }
+        _ => None,
+    };
+    let ver = veredito_com_build(ver, build.as_ref());
+    match &build {
+        Some(Decisao::Reinstalar(m)) => {
+            println!(
+                "{}",
+                divergencia::mensagem_reinstala(app.bin, ultima.as_deref().unwrap_or("?"), m)
+            );
+        }
+        Some(Decisao::NaoConfirmei { msg, .. }) => {
+            println!(
+                "{}",
+                divergencia::mensagem_nao_confirmei(app.bin, ultima.as_deref().unwrap_or("?"), msg)
+            );
+        }
+        _ => {}
+    }
     if let (false, Veredito::AFrente, Some(pub_)) = (force, ver, ultima.as_deref()) {
         exibir::avisar_a_frente(app.bin, instalada.as_deref(), pub_);
         limpar_versoes_antigas(app);
@@ -188,6 +214,35 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
             limpar_versoes_antigas(app);
         }
         Err(e) => println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", &e)])),
+    }
+}
+
+/// **O quê:** o hub, com a MESMA versão do alvo, é de outro commit que o release (D12)? Diz o
+/// porquê na tela (e, se não deu para confirmar, avisa). `true` = reinstalar.
+///
+/// **Onde:** [`super::install_or_update`], antes do `--dry-run`/da atualização do app.
+pub(super) fn hub_diverge(instalada: Option<&str>, alvo: Option<&str>) -> bool {
+    let prov = divergencia::proveniencia_do_binario(&plataforma::app_bin(false));
+    let v = ou_nenhum(instalada);
+    match divergencia::checar(plataforma::APP_REPO, instalada, alvo, &prov) {
+        Some(Decisao::Reinstalar(m)) => {
+            println!("{}", divergencia::mensagem_reinstala("schematize", &v, &m));
+            true
+        }
+        Some(Decisao::NaoConfirmei { msg, .. }) => {
+            println!("{}", divergencia::mensagem_nao_confirmei("schematize", &v, &msg));
+            false
+        }
+        _ => false,
+    }
+}
+
+/// **O quê:** o veredito de versão corrigido pelo de build (D12): mesma versão com outro
+/// commit vira [`Veredito::Atualizar`]. PURA. **Onde:** [`atualizar_componente`] e o plano.
+pub(super) fn veredito_com_build(ver: Veredito, build: Option<&Decisao>) -> Veredito {
+    match (ver, build) {
+        (Veredito::EmDia, Some(Decisao::Reinstalar(_))) => Veredito::Atualizar,
+        (v, _) => v,
     }
 }
 
@@ -358,6 +413,21 @@ fn finish(target: &str) {
 mod tests {
     use super::*;
     use alvo::{Alvo, Metodo};
+
+    /// D12: só "em dia" + build divergente vira atualizar; o resto do veredito é intocado.
+    #[test]
+    fn build_divergente_vira_atualizar_e_so_isso() {
+        use divergencia::Motivo;
+        let r = Decisao::Reinstalar(Motivo::SemProveniencia);
+        assert_eq!(veredito_com_build(Veredito::EmDia, Some(&r)), Veredito::Atualizar);
+        assert_eq!(veredito_com_build(Veredito::AFrente, Some(&r)), Veredito::AFrente);
+        assert_eq!(veredito_com_build(Veredito::EmDia, Some(&Decisao::EmDia)), Veredito::EmDia);
+        assert_eq!(
+            veredito_com_build(Veredito::EmDia, Some(&Decisao::ManterFonte)),
+            Veredito::EmDia
+        );
+        assert_eq!(veredito_com_build(Veredito::EmDia, None), Veredito::EmDia);
+    }
 
     /// Binário + alvo com asset = baixa o release; é o caminho do `update` dos apps por binário.
     #[test]

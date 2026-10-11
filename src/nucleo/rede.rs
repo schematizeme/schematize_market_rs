@@ -42,6 +42,23 @@ pub fn get_text(url: &str) -> Option<String> {
     }
 }
 
+/// **O quê:** [`get_text`] com UM cabeçalho extra (`"Accept: application/vnd.github.sha"`).
+/// `None` se falhar. No Windows só com `curl` (sem ele, `None`: o chamador diz a causa).
+///
+/// **Onde:** [`crate::atualizar::divergencia`], na consulta de commit pela API — só quando o
+/// `git` não existe.
+pub fn get_text_com_cabecalho(url: &str, cabecalho: &str) -> Option<String> {
+    #[cfg(not(windows))]
+    {
+        util::capture("curl", &["-fsSL", "-m", "20", "-H", UA, "-H", cabecalho, url])
+    }
+    #[cfg(windows)]
+    {
+        let c = curl_do_windows()?;
+        util::capture(c, &["-fsSL", "-m", "20", "-H", UA, "-H", cabecalho, url])
+    }
+}
+
 /// **O quê:** baixa `url` para `dest`. `true` se o arquivo ficou gravado.
 ///
 /// **Onde:** [`crate::atualizar`], no caminho rápido (binário pré-compilado) e no self-update.

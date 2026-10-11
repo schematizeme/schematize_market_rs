@@ -5,7 +5,7 @@
 //! verifica e instala os dois em `~/.cargo/bin` com a MESMA mecânica do hub
 //! ([`super::binario`]: `chmod`, `--version`, rename atômico).
 //!
-//! **Onde:** o `install` de um app ([`crate::appsdacasa::instalar_do_release_ou_fonte`]), o `update` de um
+//! **Onde:** o `install` de um app ([`crate::appsdacasa::instalar_app_da_casa`]), o `update` de um
 //! componente instalado por binário ([`super::componentes`]) e o alvo/`status`
 //! ([`super::alvo::consultar_publicado`]).
 //!
@@ -256,7 +256,7 @@ pub enum Via {
 
 /// **O quê:** instala por release; cai no `fonte` SÓ se o repo não tem release casando.
 ///
-/// **Onde:** [`crate::appsdacasa::instalar_do_release_ou_fonte`].
+/// **Onde:** [`crate::appsdacasa::instalar_app_da_casa`].
 ///
 /// - `Achou` -> baixa e instala; falha no download é `Err` (não compila).
 /// - `SemAsset` / `SemRelease` / plataforma sem asset -> avisa e chama `fonte`.

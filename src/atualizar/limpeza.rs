@@ -7,7 +7,7 @@
 //! market que ficou sem uso.
 //!
 //! **Onde:** o fim de [`super::componentes`] (hub, apps geridos e self-update do market) e de
-//! [`crate::appsdacasa::instalar_do_release_ou_fonte`]. É COMPULSÓRIO (D11): não há flag que
+//! [`crate::appsdacasa::instalar_app_da_casa`]. É COMPULSÓRIO (D11): não há flag que
 //! desligue. Quem quiser ver o que seria feito usa o `--dry-run`, que não instala nem limpa.
 //!
 //! ## Por que existe
@@ -352,7 +352,7 @@ pub fn caminho_old(p: &Path) -> PathBuf {
 
 /// **O quê:** remove `p`. No Windows, um `.exe` em uso (acesso negado) é renomeado para `.old`.
 /// **Onde:** [`Ambiente::real`]. Nunca segue symlink: `remove_file` apaga o link.
-fn remover_real(p: &Path) -> io::Result<Option<PathBuf>> {
+pub(crate) fn remover_real(p: &Path) -> io::Result<Option<PathBuf>> {
     match std::fs::remove_file(p) {
         Ok(()) => Ok(None),
         #[cfg(windows)]

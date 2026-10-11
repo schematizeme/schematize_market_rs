@@ -26,8 +26,10 @@
 pub mod alvo;
 pub mod binario;
 mod componentes;
+pub mod divergencia;
 pub mod exibir;
 pub mod fonte;
+pub mod instalacao;
 pub mod limpeza;
 pub mod metodo;
 pub mod purga;
@@ -37,7 +39,9 @@ pub mod versao;
 
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::plataforma;
-use componentes::{atualizar_app, atualizar_componente, limpar_versoes_antigas_do_hub};
+use componentes::{
+    atualizar_app, atualizar_componente, hub_diverge, limpar_versoes_antigas_do_hub,
+};
 use exibir::imprimir_plano;
 use std::path::PathBuf;
 
@@ -316,6 +320,10 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
             == metodo::Veredito::AFrente;
     if target.is_none() || a_frente {
         plano.app = false;
+    }
+    // D12: mesma versão, outro commit -> reinstala do release (salvo `fonte`).
+    if !force && !a_frente && !plano.app && hub_diverge(installed.as_deref(), target.as_deref()) {
+        plano.app = true;
     }
 
     if dry_run {

@@ -21,6 +21,7 @@
 //! que o segredo **não** transite pelo processo onde o agente opera.
 
 use crate::agentrun::resolve_bin;
+use crate::atualizar::instalacao;
 use std::path::PathBuf;
 
 /// Um app EXTERNO do ecossistema — instalável à parte, e que o schematize apenas conhece.
@@ -285,37 +286,54 @@ pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// **O quê:** instala um app da casa — binário de release primeiro, fonte só se não houver.
+/// **O quê:** instala um app da casa — binário de release primeiro, fonte só se não houver —
+/// olhando a cópia CANÔNICA (`~/.cargo/bin`), não o PATH (D12).
 ///
 /// **Onde:** `schematize-market install <app>` ([`crate::cli`]).
 ///
-/// **O quê (detalhe):** tenta o asset `<bin>-<os>-<arch>` do último release (e o da janela);
-/// compila SÓ se o repo não tem release casando. Rede/cota fora é `Err`, não build. Registra o
-/// método `binario` (D8); o `fonte` é registrado por [`instalar_do_fonte`].
-pub fn instalar_do_release_ou_fonte(bin: &str) -> Result<(), String> {
-    use crate::atualizar::{alvo::Metodo, metodo, release};
+/// **O quê (detalhe):** compara a cópia canônica com o release ([`instalacao::avaliar`]): ausente,
+/// mais velha ou de outro commit com a mesma versão -> baixa o asset `<bin>-<os>-<arch>` do último
+/// release (e o da janela) e instala lá; igual -> diz que está instalado. Nos dois casos a
+/// limpeza compulsória (D11) remove as cópias antigas de outros diretórios. Compila SÓ se o
+/// repo não tem release casando; rede/cota fora é `Err`, não build. Registra o método `binario`
+/// (D8); o `fonte` é registrado por [`instalar_do_fonte`]. `confirmar` recebe o motivo.
+pub fn instalar_app_da_casa(
+    bin: &str,
+    dry_run: bool,
+    confirmar: impl FnOnce(&str) -> bool,
+) -> Result<instalacao::Resultado, String> {
+    use crate::atualizar::{alvo, divergencia, limpeza, metodo, release};
     let app = crate::atualizar::APPS_GERIDOS
         .iter()
         .find(|a| a.bin == bin)
         .ok_or_else(|| format!("não sei de que repositório vem o `{bin}`"))?;
     let assets = release::assets_do_app(app);
-    let via = release::instalar_ou_fonte(
+    let dest = release::destino_do_app(app);
+    // Uma cópia achada fora da pasta canônica só serve para a mensagem: ela NÃO conta como
+    // instalada (era o defeito do D12 — o PATH escolhendo uma 0.0.5 velha).
+    let fora = resolve_bin(bin).filter(|p| p.canonicalize().ok() != dest.cli.canonicalize().ok());
+    let entrada = instalacao::Entrada {
+        repo: app.repo,
+        bin: app.bin,
+        assets: assets.as_ref(),
+        dest: &dest,
+        metodo: alvo::metodo_de(app.repo),
+        fora,
+    };
+    let r = instalacao::instalar_com(
         &release::RedeReal,
-        app.repo,
-        assets.as_ref(),
-        &release::destino_do_app(app),
+        &divergencia::CommitsReais::github(),
+        &entrada,
+        &limpeza::Ambiente::real(),
+        &|de_binario| limpeza::alvo_do_app(app, de_binario),
+        dry_run,
+        confirmar,
         || instalar_do_fonte(bin),
     )?;
-    let de_binario = matches!(via, release::Via::Release(_));
-    if de_binario {
-        metodo::registrar(app.repo, Metodo::Binario);
+    if matches!(r, instalacao::Resultado::Instalado(release::Via::Release(_))) {
+        metodo::registrar(app.repo, alvo::Metodo::Binario);
     }
-    // D11: instalação concluída = versões antigas (e, se veio de binário, o cache de build) saem.
-    // O `?` acima já impede isto numa instalação que falhou.
-    crate::atualizar::limpeza::apos_sucesso(&crate::atualizar::limpeza::alvo_do_app(
-        app, de_binario,
-    ));
-    Ok(())
+    Ok(r)
 }
 
 /// **O quê:** põe o app recém-instalado no menu de aplicativos. Best-effort, mas **nunca
@@ -495,20 +513,22 @@ mod tests {
         }
     }
 
-    /// O CLI instala por `instalar_do_release_ou_fonte` (release primeiro). Chamar `instalar_do_fonte` direto
-    /// de lá traria de volta o build para todo leigo (§37.48).
+    /// O CLI instala por `instalar_app_da_casa` (release primeiro, cópia canônica — D12). Chamar
+    /// `instalar_do_fonte` direto de lá traria de volta o build para todo leigo (§37.48).
     #[test]
     fn a_cli_instala_pelo_release_primeiro() {
         let cli = include_str!("cli/instalar.rs");
         let producao = cli.split("#[cfg(test)]").next().unwrap_or(cli);
         assert!(
-            producao.contains("instalar_do_release_ou_fonte(a.bin)"),
-            "a CLI deve chamar instalar_do_release_ou_fonte"
+            producao.contains("instalar_app_da_casa(a.bin"),
+            "a CLI deve chamar instalar_app_da_casa"
         );
         assert!(!producao.contains("instalar_do_fonte(a.bin)"), "build direto voltou à CLI");
         let aqui = include_str!("appsdacasa.rs");
-        let corpo = aqui.split("pub fn instalar_do_release_ou_fonte").nth(1).unwrap_or("");
+        let corpo = aqui.split("pub fn instalar_app_da_casa").nth(1).unwrap_or("");
         let corpo = corpo.split("pub fn registrar_no_menu").next().unwrap_or("");
-        assert!(corpo.contains("instalar_ou_fonte") && corpo.contains("Metodo::Binario"));
+        assert!(corpo.contains("instalar_com") && corpo.contains("Metodo::Binario"));
+        let inst = include_str!("atualizar/instalacao.rs");
+        assert!(inst.contains("release::instalar_ou_fonte"), "o release vem antes do fonte");
     }
 }

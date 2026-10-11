@@ -11,7 +11,7 @@
 //! update | status | pin | unpin | run` passa a ser `schematize-market <o mesmo>` — mesmos
 //! verbos, de propósito: quem tem o comando na mão só troca o nome do programa.
 
-use market::atualizar::{self, exibir, versao};
+use market::atualizar::{self, divergencia, exibir, versao};
 use market::i18n::{t, tf};
 use market::nucleo::plataforma;
 
@@ -75,9 +75,16 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
             t("up.st_prebuilt_no")
         },
     );
-    campo(t("up.st_app"), versionado(versao::installed_app_version()));
-    for (r, v) in exibir::linhas_de_versoes(&exibir::versoes_de(plataforma::APP_REPO)) {
+    let hub = (versao::installed_app_version(), exibir::versoes_de(plataforma::APP_REPO));
+    campo(t("up.st_app"), versionado(hub.0.clone()));
+    for (r, v) in exibir::linhas_de_versoes(&hub.1) {
         campo(r, v);
+    }
+    let prov_hub = divergencia::proveniencia_do_binario(&plataforma::app_bin(false));
+    if let Some(l) =
+        linha_do_build(&estado_do_build(plataforma::APP_REPO, hub.0.as_deref(), &hub.1, &prov_hub))
+    {
+        campo("  build".into(), l);
     }
 
     for app in atualizar::estado_dos_apps() {
@@ -89,9 +96,18 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
         // `versao_instalada` e não o caminho direto: numa máquina que instalou antes da
         // renomeação do ADR-0012, o arquivo tem o nome ANTIGO — e dizer "nenhum" sobre um app
         // que está lá é a pior resposta possível num comando de diagnóstico.
-        campo(app.bin.to_string(), versionado(app.versao_instalada()));
-        for (r, v) in exibir::linhas_de_versoes(&exibir::versoes_de(app.repo)) {
-            campo(format!("  {r}"), v);
+        let (instalada, v) = (app.versao_instalada(), exibir::versoes_de(app.repo));
+        campo(app.bin.to_string(), versionado(instalada.clone()));
+        for (r, linha) in exibir::linhas_de_versoes(&v) {
+            campo(format!("  {r}"), linha);
+        }
+        if let Some(l) = linha_do_build(&estado_do_build(
+            app.repo,
+            instalada.as_deref(),
+            &v,
+            &divergencia::proveniencia_do_app(app),
+        )) {
+            campo("  build".into(), l);
         }
     }
 
@@ -140,27 +156,42 @@ fn status_json() -> Result<(), String> {
 
     let mut apps = Vec::new();
     for app in atualizar::estado_dos_apps() {
+        let (instalada, v) = (app.versao_instalada(), exibir::versoes_de(app.repo));
+        let build = estado_do_build(
+            app.repo,
+            instalada.as_deref(),
+            &v,
+            &divergencia::proveniencia_do_app(app),
+        );
         apps.push(format!(
-            "    {{\"bin\": \"{}\", \"repo\": \"{}\", \"installed\": {}, \"latest\": {}, {}}}",
+            "    {{\"bin\": \"{}\", \"repo\": \"{}\", \"installed\": {}, \"latest\": {}, {}, {}}}",
             esc(app.bin),
             esc(app.repo),
-            campo(app.versao_instalada()),
+            campo(instalada),
             campo(atualizar::alvo::ultima_publicada(app.repo)),
-            exibir::campos_json(&exibir::versoes_de(app.repo))
+            exibir::campos_json(&v),
+            divergencia::campos_json(&build, "")
         ));
     }
+    let hub_v = exibir::versoes_de(plataforma::APP_REPO);
+    let hub_instalada = versao::installed_app_version();
+    let prov_hub = divergencia::proveniencia_do_binario(&plataforma::app_bin(false));
+    let hub_build =
+        estado_do_build(plataforma::APP_REPO, hub_instalada.as_deref(), &hub_v, &prov_hub);
 
     println!("{{");
     println!("  \"market\": \"{}\",", env!("CARGO_PKG_VERSION"));
     println!("  \"os\": \"{}\",", std::env::consts::OS);
     println!("  \"arch\": \"{}\",", std::env::consts::ARCH);
     println!("  \"prebuilt\": {},", plataforma::asset_names().is_some());
-    println!("  \"app_installed\": {},", campo(versao::installed_app_version()));
+    println!("  \"app_installed\": {},", campo(hub_instalada));
     // `app_latest` MANTÉM o significado de antes do D8 (consumido por fora — ver o doc): o alvo
     // do método de instalação (release p/ binário, main p/ fonte). Os campos novos e inequívocos
     // vêm ao lado.
     println!("  \"app_latest\": {},", campo(versao::latest_app_version()));
-    println!("  {},", exibir::campos_json(&exibir::versoes_de(plataforma::APP_REPO)));
+    println!("  {},", exibir::campos_json(&hub_v));
+    // D12: o commit do binário instalado x o da tag do release (campos novos; só acrescentam).
+    println!("  {},", divergencia::campos_json(&hub_build, "app_"));
     println!("  \"pin\": {},", campo(versao::read_pin()));
     println!("  \"install_dir\": \"{}\",", esc(&plataforma::install_dir().display().to_string()));
     println!("  \"apps\": [");
@@ -168,6 +199,31 @@ fn status_json() -> Result<(), String> {
     println!("  ]");
     println!("}}");
     Ok(())
+}
+
+/// **O quê:** o [`divergencia::EstadoBuild`] de `repo` a partir do que o `status` já colheu.
+/// Toca a rede (um `ls-remote`). **Onde:** o `status`, humano e `--json`.
+fn estado_do_build(
+    repo: &str,
+    instalada: Option<&str>,
+    v: &exibir::Versoes,
+    prov: &divergencia::Proveniencia,
+) -> divergencia::EstadoBuild {
+    let release = v.release.as_ref().ok().and_then(|r| r.as_deref());
+    divergencia::estado_build(&divergencia::CommitsReais::github(), repo, instalada, release, prov)
+}
+
+/// **O quê:** a linha humana do `status` sobre o build, ou `None` se está tudo certo (o
+/// `status` só fala do que importa). **Onde:** [`status_cmd`].
+fn linha_do_build(e: &divergencia::EstadoBuild) -> Option<String> {
+    if e.diverge {
+        return Some(format!(
+            "DIVERGE do release (instalado {}, release {}) — `update` reinstala",
+            e.instalado.as_deref().unwrap_or("sem commit"),
+            e.release.as_deref().map(|r| &r[..12.min(r.len())]).unwrap_or("?")
+        ));
+    }
+    e.erro.map(|c| format!("não consegui confirmar o commit do release ({c})"))
 }
 
 /// **O quê:** `schematize-market run` — lança a GUI instalada pelo caminho absoluto.

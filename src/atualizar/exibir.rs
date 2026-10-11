@@ -28,9 +28,21 @@ pub(super) fn imprimir_plano(plano: &Plano, instalada: Option<&str>, alvo: &str)
     );
     for app in &plano.componentes {
         let inst = app.versao_instalada();
-        let ult = alvo::ultima_publicada(app.repo);
+        let al = alvo::alvo_de(app.repo);
+        let ult = match &al {
+            alvo::Alvo::Versao(v) | alvo::Alvo::SemAsset { versao: v } => Some(v.clone()),
+            alvo::Alvo::Indisponivel(_) => None,
+        };
         let ver =
             metodo::veredito(alvo::metodo_de(app.repo), false, inst.as_deref(), ult.as_deref());
+        // D12: mesma versão + outro commit também é "atualizar" — o plano não pode mentir.
+        let build = match al {
+            alvo::Alvo::Versao(_) => {
+                super::divergencia::checar_app(app, inst.as_deref(), ult.as_deref())
+            }
+            _ => None,
+        };
+        let ver = super::componentes::veredito_com_build(ver, build.as_ref());
         println!(
             "  {:<24} {}",
             app.bin,

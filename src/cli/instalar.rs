@@ -9,9 +9,8 @@
 //! terminaria num "não conheço a linguagem schematize-deployer" — verdade técnica e resposta
 //! inútil.
 
-use market::appsdacasa::{
-    descobrir_app, externo, instalar_do_release_ou_fonte, registrar_no_menu, Estado, EXTERNOS,
-};
+use market::appsdacasa::{externo, instalar_app_da_casa, registrar_no_menu, EXTERNOS};
+use market::atualizar::instalacao::Resultado;
 use market::environments;
 
 /// **O quê:** instala um app da casa, uma linguagem ou uma ferramenta de dev.
@@ -50,7 +49,7 @@ pub(crate) fn remove_cmd(what: &str, method: Option<String>, dry_run: bool) -> R
 /// **Onde:** [`install_cmd`], quando o alvo está na tabela [`EXTERNOS`].
 ///
 /// **O que mudou no ADR-0013:** isto executava `curl -fsSL <install.sh> | bash -s -- --flag`.
-/// Agora o market instala ele mesmo ([`crate::appsdacasa::instalar_do_release_ou_fonte`]): release primeiro, fonte só sem binário — e porque o
+/// Agora o market instala ele mesmo ([`crate::appsdacasa::instalar_app_da_casa`]): release primeiro, fonte só sem binário — e porque o
 /// `install.sh` passou a delegar para cá: manter o `curl` faria os dois se chamarem em círculo.
 fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
     // Deny-by-default: só o que está na tabela. Nome desconhecido não vira alvo de build.
@@ -59,38 +58,37 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
         return Err(format!("não conheço o app `{nome}`. Os que existem: {}", nomes.join(", ")));
     };
 
-    if let Estado::Instalado { versao, caminho } = descobrir_app(a.bin) {
-        println!("{} {versao} já está instalado em {}", a.bin, caminho.display());
-        println!("Para atualizar, rode:");
-        println!("    schematize-market update");
-        return Ok(());
+    // D12: quem decide é a cópia CANÔNICA (`~/.cargo/bin`) contra o release — uma cópia velha
+    // achada pelo PATH não conta como instalada. O banner e a confirmação só aparecem se há o
+    // que instalar.
+    let banner = |_motivo: &str| {
+        println!("Vou instalar o `{}` — {}", a.bin, a.sobre);
+        println!();
+        println!("  Baixo o binário pronto do release (segundos, sem compilar). Só se o app");
+        println!("  ainda não tiver binário para esta máquina é que eu compilo do fonte —");
+        println!("  e aí leva minutos e pode pedir sudo para as bibliotecas de build.");
+        yes || environments::confirm()
+    };
+    match instalar_app_da_casa(a.bin, dry_run, banner)? {
+        Resultado::JaInstalado { .. } => {
+            println!("Para atualizar, rode:");
+            println!("    schematize-market update");
+            return Ok(());
+        }
+        Resultado::NaoConfirmado { .. } | Resultado::SoSimulou | Resultado::Cancelado => {
+            return Ok(());
+        }
+        Resultado::Instalado(_) => {}
     }
-    if dry_run {
-        println!(
-            "(dry-run) instalaria o `{}` (binário pronto; do fonte só se não houver) e o poria no menu.",
-            a.bin
-        );
-        return Ok(());
-    }
-
-    println!("Vou instalar o `{}` — {}", a.bin, a.sobre);
-    println!();
-    println!("  Baixo o binário pronto do release (segundos, sem compilar). Só se o app");
-    println!("  ainda não tiver binário para esta máquina é que eu compilo do fonte —");
-    println!("  e aí leva minutos e pode pedir sudo para as bibliotecas de build.");
-    if !yes && !environments::confirm() {
-        println!("cancelado — nada foi feito.");
-        return Ok(());
-    }
-
-    instalar_do_release_ou_fonte(a.bin)?;
     registrar_no_menu(a.bin);
 
     // Veredito pelo ESTADO, não pelo código de saída: um build que termina 0 sem produzir um
-    // binário que responde não instalou nada, e dizer "pronto" ali seria mentir.
-    match descobrir_app(a.bin) {
-        Estado::Instalado { versao, .. } => println!("\n✓ {} {versao} instalado.", a.bin),
-        _ => println!(
+    // binário que responde não instalou nada, e dizer "pronto" ali seria mentir. Olha a cópia
+    // CANÔNICA — o PATH ainda pode apontar para outra até o próximo shell.
+    let canonico = market::atualizar::APPS_GERIDOS.iter().find(|x| x.bin == a.bin);
+    match canonico.and_then(|x| x.versao_instalada()) {
+        Some(versao) => println!("\n✓ {} {versao} instalado.", a.bin),
+        None => println!(
             "\nO build terminou, mas o `{}` ainda não responde. Rode \
              `schematize-market list` para ver o estado.",
             a.bin
