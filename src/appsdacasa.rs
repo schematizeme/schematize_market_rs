@@ -1,7 +1,7 @@
 //! OS APPS DA CASA — descoberta e instalação dos apps do ecossistema.
 //!
-//! **O quê:** descobre se o Deployer está instalado, qual versão, e o invoca como
-//! subprocesso quando o usuário pede.
+//! **O quê:** descobre se os apps da casa estão instalados, qual versão, e os instala do
+//! fonte quando o usuário pede.
 //!
 //! **Onde:** `schematize deployer <sub>` (CLI) e, adiante, o card da GUI.
 //!
@@ -62,16 +62,93 @@ pub const EXTERNOS: &[AppExterno] = &[
         bin: "schematize-skills",
         sobre: "o catálogo de skills, o que está instalado, a autoria e o fork",
     },
+    AppExterno {
+        bin: "schematize-overdev",
+        sobre: "o laço de desenvolvimento contínuo: checklist, caixa, notas e a execução do agente",
+    },
 ];
 
-// O `schematize-skills` e o `schematize-overdev` NÃO estão aqui, e é de propósito: eles ainda
-// não existem. Listá-los daria uma linha "não instalado" que a pessoa tentaria instalar, e o
-// `install` mandaria uma flag que o `install.sh` não conhece.
-//
-// Mais que isso: o ADR-0012 diz que eles podem **não sair** — são 11 e 8 consumidores no
-// núcleo do hub, e a decisão foi que um overdev meio extraído é pior que um hub com overdev
-// dentro. Anunciar aqui o que talvez nunca exista seria prometer pela tabela o que a decisão
-// se recusou a prometer. Entram quando forem repositório com release, não antes.
+// O `schematize-skills` (E5) e o `schematize-overdev` (E6) entram na tabela quando viram
+// repositório com `[[bin]]` próprio e janela no mesmo repo — o ADR-0012 F4 os extraiu do hub
+// com a ressalva de que um overdev meio extraído seria pior que um hub com overdev dentro, e a
+// extradição só conta como feita com o repo existindo. O skills já é público. O overdev está no
+// código do market (`main`) mas o repo `schematizeme/schematize_overdev_rs` é PRIVADO até o dono
+// virar a chave: antes disso o `install` falha com a causa `not_found` dita
+// ([`avaliar_acesso`]), nunca com o erro cru do `git`. Os apps que o hub PUBLICADO ainda não
+// delega são marcados em `schematize_cli_rs/src/instalardica.rs` (`mercado`), não aqui: esta
+// tabela diz o que o market de `main` gerencia; aquela diz o que o market PUBLICADO gerencia.
+
+/// **O quê:** decide, a partir da sonda do GitHub, se vale tentar clonar `repo`. Função PURA.
+///
+/// **Onde:** [`checar_acesso_ao_repo`], antes do primeiro `git clone` de [`instalar_do_fonte`].
+///
+/// **Por que existe:** um repo ainda PRIVADO (o `schematize-overdev` é, até o dono publicá-lo)
+/// faz o `git clone` pedir usuário/senha ou morrer com `fatal: could not read Username` —
+/// causa verdadeira, mensagem inútil para quem não sabe o que é um repo privado. A
+/// [`Causa::NotFound`](crate::nucleo::rede::Causa) é a MESMA que o `status` já mostra em
+/// `latest_release_error`; aqui ela ganha o texto acionável.
+///
+/// **Só o 404 barra:** rede fora, cota e qualquer outra resposta seguem para o clone, que dirá
+/// a própria causa. Barrar por uma sonda que falhou por OUTRO motivo mentiria.
+pub fn avaliar_acesso(
+    bin: &str,
+    repo: &str,
+    sonda: Result<String, (crate::nucleo::rede::Causa, String)>,
+) -> Result<(), String> {
+    match sonda {
+        Err((crate::nucleo::rede::Causa::NotFound, _)) => Err(format!(
+            "não consegui instalar o `{bin}`: o repositório {repo} não foi encontrado no GitHub \
+             (not_found) — ele é privado ou ainda não foi publicado.\n  \
+             Nada foi alterado na sua máquina. O `{bin}` não é pré-requisito do resto: o que já \
+             está instalado segue funcionando.\n  \
+             Se você TEM acesso ao repositório, entre no GitHub (`gh auth login`) e repita:\n    \
+             schematize-market install {bin}\n  \
+             Se não, repita quando ele for publicado."
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// **O quê:** sonda o GitHub e aplica [`avaliar_acesso`] — mas só quando um clone novo vai
+/// acontecer. **Onde:** [`instalar_do_fonte`].
+///
+/// **Checkout existente pula a sonda:** quem já tem o fonte em `build/` (ou o semeou de um
+/// clone local) não depende do 404 público. **Quem tem credencial passa:** o 404 anônimo do
+/// `curl` é o que um repo privado diz a TODOS; um `git ls-remote` sem prompt pergunta com a
+/// credencial da pessoa, e só se ele também falhar o install é barrado.
+fn checar_acesso_ao_repo(bin: &str, repo: &str) -> Result<(), String> {
+    if crate::nucleo::plataforma::build_src_dir(repo).join(".git").is_dir() {
+        return Ok(());
+    }
+    let sonda = crate::nucleo::rede::url_do_ultimo_release_tipado(repo);
+    let veredito = avaliar_acesso(bin, repo, sonda);
+    if veredito.is_ok() {
+        return Ok(());
+    }
+    let url = format!("https://github.com/{repo}");
+    // **Sem prompt de NENHUM tipo:** `GIT_TERMINAL_PROMPT=0` sozinho não basta — medido, o git
+    // cai no `ssh-askpass` e abre um diálogo gráfico "Username for github.com" na tela da pessoa
+    // (e trava esperando). `GIT_ASKPASS=true` responde vazio na hora, e sem `DISPLAY` nem há
+    // onde desenhar. A sonda pergunta com a credencial que JÁ existe; nunca pede uma nova.
+    let mut sonda = std::process::Command::new("git");
+    sonda
+        .args(["ls-remote", "--exit-code", &url, "HEAD"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_ASKPASS", "true")
+        .env("SSH_ASKPASS", "true")
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY");
+    let com_credencial = sonda
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+    match com_credencial {
+        Ok(st) if st.success() => Ok(()),
+        // Falha ao executar o git ou resposta negativa: o 404 anônimo vale, e é dito.
+        _ => veredito,
+    }
+}
 
 /// **O quê:** o nome que este binário TEVE antes, se ele foi renomeado. Uma fonte só —
 /// [`crate::atualizar::APPS_GERIDOS`].
@@ -176,6 +253,8 @@ pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
         .find(|a| a.bin == bin)
         .ok_or_else(|| format!("não sei de que repositório vem o `{bin}`"))?;
 
+    checar_acesso_ao_repo(app.bin, app.repo)?;
+
     let cargo = crate::nucleo::plataforma::ensure_toolchain()?;
     // As libs de build do sistema: o Deployer e o Optimizer não desenham janela, mas o
     // `ensure_build_deps` também traz o compilador C e o `pkg-config`, sem os quais nem as
@@ -191,6 +270,18 @@ pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
         &app.caminho(),
     )?;
     crate::atualizar::metodo::registrar(app.repo, crate::atualizar::alvo::Metodo::Fonte);
+
+    // A JANELA vem junto quando sai do mesmo repo (ADR-0020): o `build_one` copia UM binário e o
+    // `cargo build` já produziu os dois. Sem este passo o `install` deixava a janela no
+    // `target/` e a aba delegada do hub dizia "não instalada". Falha aqui não desfaz o app —
+    // mas é dita, nunca engolida.
+    if let Some((nome, dst)) = app.gui_nome_e_destino() {
+        let built = crate::nucleo::plataforma::shared_target_dir().join("release").join(&nome);
+        match crate::atualizar::binario::substitui_binario(&built, &dst) {
+            Ok(()) => println!("✓ {nome}"),
+            Err(e) => println!("aviso: `{}` está instalado, mas a janela não: {e}", app.bin),
+        }
+    }
     Ok(())
 }
 
@@ -297,5 +388,70 @@ mod tests {
         // afirmamos que a função retorna, sem panicar e sem `Result`.
         let e = descobrir_app("schematize-deployer");
         assert!(matches!(e, Estado::Instalado { .. } | Estado::Ausente | Estado::Quebrado { .. }));
+    }
+
+    /// **Todo app que o `update` conhece (e mantém se instalado) também é instalável pelo
+    /// `install`/`list`.** Foi a assimetria que o overdev teria: na tabela do `atualizar` e fora
+    /// de `EXTERNOS`, ele seria atualizado mas nunca instalável — e o `list` não o mostraria.
+    #[test]
+    fn todo_app_mantido_pelo_update_e_instalavel_e_listado() {
+        for a in crate::atualizar::APPS_GERIDOS {
+            if a.politica == crate::atualizar::Politica::Sempre {
+                continue; // o market não se instala por aqui: é quem está rodando.
+            }
+            assert!(externo(a.bin).is_some(), "{} está em APPS_GERIDOS mas não em EXTERNOS", a.bin);
+        }
+    }
+
+    /// O overdev é um app de dois binários no mesmo repo, como o skills: o headless E a janela.
+    #[test]
+    fn overdev_e_externo_com_janela_no_mesmo_repo() {
+        assert!(externo("schematize-overdev").is_some());
+        let a = crate::atualizar::APPS_GERIDOS
+            .iter()
+            .find(|a| a.bin == "schematize-overdev")
+            .expect("overdev na tabela");
+        assert_eq!(a.repo, "schematizeme/schematize_overdev_rs");
+        assert_eq!(a.gui, Some("schematize-overdev-gui"));
+        // D7/D8: repo que não publica binário é SEMPRE fonte — o install registra `fonte`.
+        assert!(!crate::atualizar::alvo::publica_binario(a.repo));
+    }
+
+    /// **O repo privado (404) vira a causa DITA, não o erro cru do `git clone`.** Pura: a sonda
+    /// entra como valor, sem rede.
+    #[test]
+    fn repo_privado_vira_mensagem_acionavel_e_nao_erro_de_git() {
+        use crate::nucleo::rede::{classificar_redirect, Causa};
+        let repo = "schematizeme/schematize_overdev_rs";
+        let sonda = classificar_redirect(repo, "404 ");
+        assert!(matches!(sonda, Err((Causa::NotFound, _))));
+        let e = avaliar_acesso("schematize-overdev", repo, sonda).unwrap_err();
+        assert!(e.contains("schematize-overdev"), "{e}");
+        assert!(e.contains(repo), "{e}");
+        assert!(e.contains("privado"), "diz que pode ser privado: {e}");
+        assert!(e.contains("not_found"), "cita o slug estável do status: {e}");
+        assert!(!e.contains("fatal:") && !e.contains("git clone"), "sem erro cru de git: {e}");
+        assert!(
+            e.contains("schematize-market install schematize-overdev"),
+            "diz como repetir: {e}"
+        );
+    }
+
+    /// Só o 404 barra. Rede fora, cota e release existente seguem para o clone, que dirá a
+    /// própria causa — barrar aqui por uma sonda que falhou por OUTRO motivo mentiria.
+    #[test]
+    fn so_o_404_barra_o_install() {
+        use crate::nucleo::rede::{classificar_redirect, Causa};
+        let repo = "a/b";
+        assert!(
+            avaliar_acesso("x", repo, Ok("https://github.com/a/b/releases/tag/v1".into())).is_ok()
+        );
+        for (saida, causa) in
+            [("000", Causa::Network), ("429 ", Causa::RateLimited), ("500 ", Causa::Unexpected)]
+        {
+            let sonda = classificar_redirect(repo, saida);
+            assert!(matches!(&sonda, Err((c, _)) if *c == causa), "{saida}");
+            assert!(avaliar_acesso("x", repo, sonda).is_ok(), "{saida} não pode barrar");
+        }
     }
 }

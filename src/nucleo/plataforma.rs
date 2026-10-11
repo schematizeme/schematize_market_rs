@@ -54,6 +54,12 @@ pub const GIT_REPO: &str = "schematizeme/schematize_git_rs";
 ///
 /// **A janela dele também mora NESTE repo**, como segundo binário (ADR-0020).
 pub const SKILLS_REPO: &str = "schematizeme/schematize_skills_rs";
+/// O app de overdev (laço contínuo, caixa, notas), extraído do hub pelo ADR-0012 F4.
+///
+/// **A janela dele também mora NESTE repo**, como segundo `[[bin]]` (`schematize-overdev-gui`,
+/// ADR-0020). **O repo é PRIVADO até o dono publicá-lo** — antes disso o `install` diz isso em
+/// vez de repassar o erro cru do `git`.
+pub const OVERDEV_REPO: &str = "schematizeme/schematize_overdev_rs";
 /// O repo DESTE programa.
 ///
 /// **Por que ele precisa saber o próprio repo:** o market é o único componente que ninguém

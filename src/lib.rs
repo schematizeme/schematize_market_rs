@@ -2,7 +2,7 @@
 //!
 //! **O quê:** [`environments`] instala linguagens (docker | mise | distro | official) e
 //! ferramentas de dev; [`appsdacasa`] descobre e instala os apps do ecossistema
-//! (deployer, optimizer, skills, overdev).
+//! (deployer, optimizer, database, git, skills, overdev).
 //!
 //! **Onde:** app próprio (ADR-0012), extraído do hub.
 //!
