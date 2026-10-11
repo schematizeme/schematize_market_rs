@@ -273,7 +273,13 @@ pub fn updater_bin_name() -> String {
 /// MESMO padrão (`<bin>-<os>-<arch>`), e tê-los escritos duas vezes é a divergência esperando
 /// acontecer — bastaria alguém acrescentar um alvo na matriz do CI e atualizar só uma lista.
 fn alvo_de_asset() -> Option<(&'static str, &'static str)> {
-    match (os(), std::env::consts::ARCH) {
+    alvo_de_asset_para(os(), std::env::consts::ARCH)
+}
+
+/// **O quê:** [`alvo_de_asset`] para um SO/arquitetura dados. Função PURA.
+/// **Onde:** [`alvo_de_asset`] e [`crate::atualizar::release::asset_do_binario_para`].
+pub fn alvo_de_asset_para(os: Os, arch: &str) -> Option<(&'static str, &'static str)> {
+    match (os, arch) {
         (Os::Linux, "x86_64") => Some(("linux-x86_64", "")),
         (Os::Mac, "aarch64") => Some(("macos-arm64", "")),
         (Os::Mac, "x86_64") => Some(("macos-x86_64", "")),

@@ -8,7 +8,9 @@
 //! mudança de comportamento.
 
 use super::metodo::{self, Veredito};
-use super::{alvo, binario, exibir, fonte, ou_nenhum, selfupdate, versao, AppGerido, Politica};
+use super::{
+    alvo, binario, exibir, fonte, ou_nenhum, release, selfupdate, versao, AppGerido, Politica,
+};
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::plataforma;
 
@@ -130,6 +132,18 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
         return;
     }
 
+    // Quem instalou por BINÁRIO atualiza por binário (D7/D8) — para todo app da tabela, não só
+    // o hub. Sem asset: explica e para; NUNCA cai num build implícito (§37.48).
+    match rota_do_componente(alvo::metodo_de(app.repo), &alvo) {
+        Rota::Release(v) => return atualizar_por_release(app, &v),
+        Rota::SemBinario(v) => return println!("{}", alvo::mensagem_sem_binario(app.repo, &v)),
+        Rota::Indisponivel => {
+            println!("aviso: {}: não sei qual versão baixar — nada foi alterado.", app.bin);
+            return;
+        }
+        Rota::Fonte => {}
+    }
+
     // Mesma resolução de toolchain do build do app. Sem ela não há o que compilar — e isso é
     // aviso, não erro: quem não tem cargo continua com o que já tinha.
     let cargo = match plataforma::ensure_toolchain() {
@@ -164,6 +178,60 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
                     Err(e) => println!("aviso: o binário está instalado, mas a janela não: {e}"),
                 }
             }
+            println!("✓ {}", tf("up.comp_done", &[("bin", app.bin)]));
+        }
+        Err(e) => println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", &e)])),
+    }
+}
+
+/// **O quê:** por onde um componente (não-market) se atualiza.
+///
+/// **Onde:** [`atualizar_componente`], depois de decidir que há algo a fazer.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Rota {
+    /// Baixa o binário do release desta versão (D7/D8: instalado por binário).
+    Release(String),
+    /// Instalado por binário, mas o release não tem os assets desta máquina: explica, não compila.
+    SemBinario(String),
+    /// Compila do fonte (quem já era do fonte).
+    Fonte,
+    /// Não se sabe o alvo (só chega aqui com `--force`).
+    Indisponivel,
+}
+
+/// **O quê:** decide a [`Rota`] a partir do método de instalação e do alvo. Função PURA.
+///
+/// **Onde:** [`atualizar_componente`]. Quem instalou por binário nunca cai num build implícito
+/// (que pede toolchain e `sudo`): só o `Fonte` registrado compila.
+pub(super) fn rota_do_componente(metodo: alvo::Metodo, alvo: &alvo::Alvo) -> Rota {
+    match (metodo, alvo) {
+        (alvo::Metodo::Fonte, _) => Rota::Fonte,
+        (alvo::Metodo::Binario, alvo::Alvo::Versao(v)) => Rota::Release(v.clone()),
+        (alvo::Metodo::Binario, alvo::Alvo::SemAsset { versao }) => {
+            Rota::SemBinario(versao.clone())
+        }
+        (alvo::Metodo::Binario, alvo::Alvo::Indisponivel(_)) => Rota::Indisponivel,
+    }
+}
+
+/// **O quê:** atualiza `app` baixando o binário do release `versao` (CLI + janela) e registra
+/// o método `binario` (D8). Nunca devolve erro: o erro é DITO (piso 10 — um app não derruba o
+/// `update` dos outros).
+///
+/// **Onde:** [`atualizar_componente`], na rota [`Rota::Release`].
+fn atualizar_por_release(app: &AppGerido, versao: &str) {
+    let Some(assets) = release::assets_do_app(app) else {
+        println!(
+            "aviso: {}: esta plataforma não tem binário pré-compilado — nada foi alterado.",
+            app.bin
+        );
+        return;
+    };
+    let dest = release::destino_do_app(app);
+    match release::baixar_e_instalar(&release::RedeReal, app.repo, versao, &assets, &dest) {
+        Ok(()) => {
+            metodo::registrar(app.repo, alvo::Metodo::Binario);
+            aposentar_nome_legado(app);
             println!("✓ {}", tf("up.comp_done", &[("bin", app.bin)]));
         }
         Err(e) => println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", &e)])),
@@ -251,4 +319,27 @@ fn finish(target: &str) {
     let dir = plataforma::install_dir().display().to_string();
     println!("✓ {}", tf("up.installed_at", &[("version", &got), ("dir", &dir)]));
     println!("  {}", t("up.reopen"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alvo::{Alvo, Metodo};
+
+    /// Binário + alvo com asset = baixa o release; é o caminho do `update` dos apps por binário.
+    #[test]
+    fn binario_com_asset_atualiza_por_release() {
+        let r = rota_do_componente(Metodo::Binario, &Alvo::Versao("0.1.0".into()));
+        assert_eq!(r, Rota::Release("0.1.0".into()));
+    }
+
+    /// Binário sem asset ou sem alvo NUNCA vira build; fonte continua compilando.
+    #[test]
+    fn binario_sem_asset_nao_compila_e_fonte_compila() {
+        let sem = Alvo::SemAsset { versao: "0.2.0".into() };
+        assert_eq!(rota_do_componente(Metodo::Binario, &sem), Rota::SemBinario("0.2.0".into()));
+        let ind = Alvo::Indisponivel("rede".into());
+        assert_eq!(rota_do_componente(Metodo::Binario, &ind), Rota::Indisponivel);
+        assert_eq!(rota_do_componente(Metodo::Fonte, &Alvo::Versao("1.0.0".into())), Rota::Fonte);
+    }
 }

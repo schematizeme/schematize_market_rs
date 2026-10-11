@@ -13,7 +13,7 @@
 //! 404, o código caía no build do fonte, e o build pedia `sudo` sem terminal. A pessoa não fez
 //! nada de errado — o gestor mirou algo que não existe para ela (§37.48).
 
-use super::versao;
+use super::{release, versao};
 use crate::nucleo::{plataforma, rede};
 
 /// **O quê:** como este componente foi instalado nesta máquina.
@@ -124,7 +124,7 @@ pub fn mensagem_sem_binario(repo: &str, versao: &str) -> String {
 ///
 /// **D8:** o método é REGISTRADO pelo market ao instalar ([`super::metodo`]); sem registro, é
 /// inferido pela procedência do binário — um checkout que sobrou NÃO decide. Só o hub e o
-/// market publicam binário; os demais só têm o caminho do fonte neste código.
+/// market têm nome próprio de asset; os demais apps seguem `<bin>-<os>-<arch>`.
 pub fn metodo_de(repo: &str) -> Metodo {
     metodo_e_origem(repo).0
 }
@@ -138,32 +138,38 @@ pub fn metodo_e_origem(repo: &str) -> (Metodo, super::metodo::Origem) {
 /// **O quê:** este repo publica binário utilizável nesta plataforma? Pura quanto ao disco.
 /// **Onde:** [`metodo_e_origem`].
 pub fn publica_binario(repo: &str) -> bool {
-    (repo == plataforma::APP_REPO || repo == plataforma::MARKET_REPO)
-        && nome_do_asset(repo).is_some()
+    assets_do_repo(repo).is_some()
 }
 
-/// **O quê:** o nome do asset de `repo` nesta plataforma (o CLI do hub, ou o do market).
-/// `None` se a plataforma não tem binário pronto. **Onde:** [`publica_binario`] e
+/// **O quê:** os assets de release de `repo` nesta plataforma. O hub e o market mantêm os
+/// nomes de sempre (e a sonda só do CLI: a janela deles é opcional); qualquer outro app da
+/// tabela usa `<bin>[-gui]-<os>-<arch>` ([`release::assets_do_app`]). `None` fora da tabela ou
+/// da matriz de plataformas. **Onde:** [`publica_binario`], [`nome_do_asset`] e
 /// [`consultar_publicado`].
-fn nome_do_asset(repo: &str) -> Option<String> {
-    if repo == plataforma::MARKET_REPO {
-        plataforma::market_asset_name()
-    } else {
-        plataforma::asset_names().map(|(cli, _)| cli)
+fn assets_do_repo(repo: &str) -> Option<release::Assets> {
+    if repo == plataforma::APP_REPO {
+        return plataforma::asset_names().map(|(cli, _)| release::Assets { cli, gui: None });
     }
+    if repo == plataforma::MARKET_REPO {
+        return plataforma::market_asset_name().map(|cli| release::Assets { cli, gui: None });
+    }
+    release::assets_do_app(super::APPS_GERIDOS.iter().find(|a| a.repo == repo)?)
+}
+
+/// **O quê:** o nome do asset do CLI de `repo` nesta plataforma. `None` se a plataforma não
+/// tem binário pronto. **Onde:** os testes e quem precisa só do nome do binário.
+#[cfg(test)]
+fn nome_do_asset(repo: &str) -> Option<String> {
+    assets_do_repo(repo).map(|a| a.cli)
 }
 
 /// **O quê:** consulta o último release publicado de `repo` e se ele tem o asset desta
-/// plataforma. Toca a rede. **Onde:** [`alvo_de`], só para instalações por binário.
+/// plataforma (e o da janela, quando o app declara uma). Toca a rede. **Onde:** [`alvo_de`],
+/// só para instalações por binário.
 pub fn consultar_publicado(repo: &str) -> Result<Publicado, String> {
-    let asset = nome_do_asset(repo)
+    let assets = assets_do_repo(repo)
         .ok_or_else(|| format!("esta plataforma não tem binário pré-compilado de {repo}"))?;
-    let url = rede::url_do_ultimo_release(repo)?;
-    let versao = versao_da_url_de_release(&url).ok_or_else(|| {
-        format!("{repo} ainda não tem nenhum release publicado (o GitHub apontou para {url})")
-    })?;
-    let tem_asset = rede::asset_existe(&rede::url_de_asset(repo, &format!("v{versao}"), &asset))?;
-    Ok(Publicado { versao, tem_asset })
+    release::como_publicado(release::consultar(&release::RedeReal, repo, &assets))
 }
 
 /// **O quê:** o último RELEASE publicado de `repo`, para exibir. `Ok(None)` = o repo não tem
@@ -262,13 +268,23 @@ mod tests {
         assert!(matches!(a, Alvo::Indisponivel(m) if !m.is_empty()));
     }
 
-    /// Só hub e market publicam binário; os demais só têm o fonte.
+    /// Todo app da tabela publica binário (`<bin>-<os>-<arch>`): o asset do hub e do market
+    /// não mudou, e os demais usam o nome do próprio binário. Repo fora da tabela, não.
     #[test]
-    fn so_hub_e_market_publicam_binario() {
-        use crate::nucleo::plataforma::{APP_REPO, DEPLOYER_REPO, MARKET_REPO};
+    fn todo_app_da_tabela_publica_binario() {
+        use crate::nucleo::plataforma::{APP_REPO, MARKET_REPO};
         assert_eq!(publica_binario(APP_REPO), plataforma::asset_names().is_some());
         assert_eq!(publica_binario(MARKET_REPO), plataforma::market_asset_name().is_some());
-        assert!(!publica_binario(DEPLOYER_REPO));
+        for a in crate::atualizar::APPS_GERIDOS {
+            assert_eq!(publica_binario(a.repo), super::super::release::assets_do_app(a).is_some());
+        }
+        assert_eq!(nome_do_asset(APP_REPO), plataforma::asset_names().map(|(c, _)| c));
+        assert_eq!(nome_do_asset(MARKET_REPO), plataforma::market_asset_name());
+        assert_eq!(
+            nome_do_asset(plataforma::OVERDEV_REPO),
+            super::super::release::asset_do_binario("schematize-overdev")
+        );
+        assert!(!publica_binario("outro/repo-qualquer"));
     }
 
     /// A URL de redirecionamento do `releases/latest` vira versão sem o `v`.

@@ -285,6 +285,33 @@ pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// **O quê:** instala um app da casa — binário de release primeiro, fonte só se não houver.
+///
+/// **Onde:** `schematize-market install <app>` ([`crate::cli`]).
+///
+/// **O quê (detalhe):** tenta o asset `<bin>-<os>-<arch>` do último release (e o da janela);
+/// compila SÓ se o repo não tem release casando. Rede/cota fora é `Err`, não build. Registra o
+/// método `binario` (D8); o `fonte` é registrado por [`instalar_do_fonte`].
+pub fn instalar_do_release_ou_fonte(bin: &str) -> Result<(), String> {
+    use crate::atualizar::{alvo::Metodo, metodo, release};
+    let app = crate::atualizar::APPS_GERIDOS
+        .iter()
+        .find(|a| a.bin == bin)
+        .ok_or_else(|| format!("não sei de que repositório vem o `{bin}`"))?;
+    let assets = release::assets_do_app(app);
+    let via = release::instalar_ou_fonte(
+        &release::RedeReal,
+        app.repo,
+        assets.as_ref(),
+        &release::destino_do_app(app),
+        || instalar_do_fonte(bin),
+    )?;
+    if matches!(via, release::Via::Release(_)) {
+        metodo::registrar(app.repo, Metodo::Binario);
+    }
+    Ok(())
+}
+
 /// **O quê:** põe o app recém-instalado no menu de aplicativos. Best-effort, mas **nunca
 /// mudo**.
 ///
@@ -413,8 +440,15 @@ mod tests {
             .expect("overdev na tabela");
         assert_eq!(a.repo, "schematizeme/schematize_overdev_rs");
         assert_eq!(a.gui, Some("schematize-overdev-gui"));
-        // D7/D8: repo que não publica binário é SEMPRE fonte — o install registra `fonte`.
-        assert!(!crate::atualizar::alvo::publica_binario(a.repo));
+        // D7/D8: o overdev publica `<bin>-<os>-<arch>` — o install tenta o release primeiro.
+        assert_eq!(
+            crate::atualizar::alvo::publica_binario(a.repo),
+            crate::atualizar::release::assets_do_app(a).is_some()
+        );
+        let assets = crate::atualizar::release::assets_do_app(a);
+        assert!(
+            assets.is_none_or(|x| x.gui.as_deref().is_some_and(|g| g.starts_with(a.gui.unwrap())))
+        );
     }
 
     /// **O repo privado (404) vira a causa DITA, não o erro cru do `git clone`.** Pura: a sonda
@@ -453,5 +487,22 @@ mod tests {
             assert!(matches!(&sonda, Err((c, _)) if *c == causa), "{saida}");
             assert!(avaliar_acesso("x", repo, sonda).is_ok(), "{saida} não pode barrar");
         }
+    }
+
+    /// O CLI instala por `instalar_do_release_ou_fonte` (release primeiro). Chamar `instalar_do_fonte` direto
+    /// de lá traria de volta o build para todo leigo (§37.48).
+    #[test]
+    fn a_cli_instala_pelo_release_primeiro() {
+        let cli = include_str!("cli/instalar.rs");
+        let producao = cli.split("#[cfg(test)]").next().unwrap_or(cli);
+        assert!(
+            producao.contains("instalar_do_release_ou_fonte(a.bin)"),
+            "a CLI deve chamar instalar_do_release_ou_fonte"
+        );
+        assert!(!producao.contains("instalar_do_fonte(a.bin)"), "build direto voltou à CLI");
+        let aqui = include_str!("appsdacasa.rs");
+        let corpo = aqui.split("pub fn instalar_do_release_ou_fonte").nth(1).unwrap_or("");
+        let corpo = corpo.split("pub fn registrar_no_menu").next().unwrap_or("");
+        assert!(corpo.contains("instalar_ou_fonte") && corpo.contains("Metodo::Binario"));
     }
 }

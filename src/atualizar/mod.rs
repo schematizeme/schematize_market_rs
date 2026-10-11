@@ -30,6 +30,7 @@ pub mod exibir;
 pub mod fonte;
 pub mod metodo;
 pub mod purga;
+pub mod release;
 pub mod selfupdate;
 pub mod versao;
 

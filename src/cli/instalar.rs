@@ -10,7 +10,7 @@
 //! inútil.
 
 use market::appsdacasa::{
-    descobrir_app, externo, instalar_do_fonte, registrar_no_menu, Estado, EXTERNOS,
+    descobrir_app, externo, instalar_do_release_ou_fonte, registrar_no_menu, Estado, EXTERNOS,
 };
 use market::environments;
 
@@ -44,12 +44,13 @@ pub(crate) fn remove_cmd(what: &str, method: Option<String>, dry_run: bool) -> R
     environments::remove(what, method, dry_run)
 }
 
-/// **O quê:** instala um app externo COMPILANDO do fonte, com aviso e confirmação.
+/// **O quê:** instala um app externo — binário pronto do release; compila só se não houver —,
+/// com aviso e confirmação.
 ///
 /// **Onde:** [`install_cmd`], quando o alvo está na tabela [`EXTERNOS`].
 ///
 /// **O que mudou no ADR-0013:** isto executava `curl -fsSL <install.sh> | bash -s -- --flag`.
-/// Agora o market compila ele mesmo ([`instalar_do_fonte`]) — porque ele já sabe, e porque o
+/// Agora o market instala ele mesmo ([`crate::appsdacasa::instalar_do_release_ou_fonte`]): release primeiro, fonte só sem binário — e porque o
 /// `install.sh` passou a delegar para cá: manter o `curl` faria os dois se chamarem em círculo.
 fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
     // Deny-by-default: só o que está na tabela. Nome desconhecido não vira alvo de build.
@@ -65,20 +66,24 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
         return Ok(());
     }
     if dry_run {
-        println!("(dry-run) compilaria o `{}` do fonte e o poria no menu.", a.bin);
+        println!(
+            "(dry-run) instalaria o `{}` (binário pronto; do fonte só se não houver) e o poria no menu.",
+            a.bin
+        );
         return Ok(());
     }
 
     println!("Vou instalar o `{}` — {}", a.bin, a.sobre);
     println!();
-    println!("  Isto COMPILA do fonte e leva minutos. Precisa de rede, e pode pedir sudo");
-    println!("  para as bibliotecas de build do sistema.");
+    println!("  Baixo o binário pronto do release (segundos, sem compilar). Só se o app");
+    println!("  ainda não tiver binário para esta máquina é que eu compilo do fonte —");
+    println!("  e aí leva minutos e pode pedir sudo para as bibliotecas de build.");
     if !yes && !environments::confirm() {
         println!("cancelado — nada foi feito.");
         return Ok(());
     }
 
-    instalar_do_fonte(a.bin)?;
+    instalar_do_release_ou_fonte(a.bin)?;
     registrar_no_menu(a.bin);
 
     // Veredito pelo ESTADO, não pelo código de saída: um build que termina 0 sem produzir um
