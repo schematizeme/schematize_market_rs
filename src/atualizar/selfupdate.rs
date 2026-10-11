@@ -150,6 +150,7 @@ pub fn trocar_com_rede(candidato: &Path, destino: &Path, esperada: &str) -> Resu
     if !candidato.is_file() {
         return Err(format!("o candidato {} não existe", candidato.display()));
     }
+    binario::garante_diretorio_pai(destino)?;
     let tmp = binario::caminho_temporario(destino);
     verificar_mesmo_filesystem(&tmp, destino)?;
 

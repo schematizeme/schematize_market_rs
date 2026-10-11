@@ -152,7 +152,9 @@ pub fn ler_pin_de(p: &Path) -> Option<String> {
 /// **O quê:** fixa uma versão. `None` desafixa (volta a seguir a última publicada).
 /// **Onde:** os comandos `pin` e `unpin`.
 pub fn write_pin(v: Option<&str>) -> Result<(), String> {
-    let _ = std::fs::create_dir_all(plataforma::state_dir());
+    let sd = plataforma::state_dir();
+    std::fs::create_dir_all(&sd)
+        .map_err(|e| format!("não consegui criar {}: {e}", sd.display()))?;
     match v {
         Some(v) => std::fs::write(pin_file(), v)
             .map_err(|e| format!("não consegui gravar {}: {e}", pin_file().display())),

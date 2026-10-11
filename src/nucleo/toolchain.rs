@@ -65,7 +65,8 @@ pub fn ensure_toolchain() -> Result<PathBuf, String> {
 /// **O quê:** baixa e roda o `rustup-init.exe`. **Onde:** [`ensure_toolchain`] no Windows.
 fn instalar_rustup_windows() -> Result<(), String> {
     let tmp = plataforma::state_dir().join("rustup-init.exe");
-    let _ = std::fs::create_dir_all(plataforma::state_dir());
+    std::fs::create_dir_all(plataforma::state_dir())
+        .map_err(|e| format!("não consegui criar {}: {e}", plataforma::state_dir().display()))?;
     if !super::rede::download("https://win.rustup.rs/x86_64", &tmp) {
         return Err("não consegui baixar o rustup-init.exe. \
                     Instale o Rust manualmente em https://rustup.rs"

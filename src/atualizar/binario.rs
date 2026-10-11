@@ -146,6 +146,7 @@ pub fn make_executable(p: &Path) {
 /// No Windows, se o destino estiver em uso, [`substitui_binario`] aposenta o antigo como
 /// `.old` antes — não dá para sobrescrever um `.exe` em execução.
 pub fn place(src: &Path, dst: &Path) -> Result<(), String> {
+    garante_diretorio_pai(dst)?;
     // Caminho feliz: o download já está no mesmo sistema de arquivos → um rename resolve.
     if std::fs::rename(src, dst).is_ok() {
         make_executable(dst);
@@ -185,6 +186,8 @@ pub fn substitui_binario(src: &Path, dst: &Path) -> Result<(), String> {
         let _ = std::fs::remove_file(&old);
         let _ = std::fs::rename(dst, &old);
     }
+    // Máquina só com binário (sem cargo) não tem `~/.cargo/bin`: cria, ou o install falha.
+    garante_diretorio_pai(dst)?;
     let tmp = caminho_temporario(dst);
     let _ = std::fs::remove_file(&tmp);
     std::fs::copy(src, &tmp).map_err(|e| format!("não consegui gravar {}: {e}", tmp.display()))?;
@@ -196,6 +199,17 @@ pub fn substitui_binario(src: &Path, dst: &Path) -> Result<(), String> {
         return Err(format!("não consegui substituir {}: {e}", dst.display()));
     }
     Ok(())
+}
+
+/// **O quê:** cria o diretório-pai de `dst` (e ancestrais) se não existir; erro propagado com
+/// contexto. **Onde:** [`substitui_binario`], [`place`] e [`super::selfupdate`] — todo ponto que
+/// grava um binário em `~/.cargo/bin`, que NÃO existe em máquina sem cargo (§37.48).
+pub fn garante_diretorio_pai(dst: &Path) -> Result<(), String> {
+    match dst.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => std::fs::create_dir_all(dir)
+            .map_err(|e| format!("não consegui criar o diretório {}: {e}", dir.display())),
+        _ => Ok(()),
+    }
 }
 
 /// **O quê:** o caminho do temporário de uma substituição — `<destino>.novo`, NO MESMO
@@ -354,6 +368,28 @@ mod tests {
 
     /// Falhar a substituição NÃO deixa `.novo` órfão — um binário inteiro por tentativa
     /// frustrada vira lixo que ninguém sabe de onde veio.
+    /// Máquina sem cargo: `$HOME/.cargo/bin` não existe e a instalação tem de criá-lo.
+    #[test]
+    fn instala_criando_diretorio_ausente() {
+        let base = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/tmp")
+            .join(format!("nocargo-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let fonte = base.join("fake-bin");
+        std::fs::write(&fonte, "#!/bin/sh\nexit 0\n").unwrap();
+        let dst = base.join("home/.cargo/bin/schematize-market");
+        assert!(!dst.parent().unwrap().exists());
+
+        substitui_binario(&fonte, &dst).expect("devia criar ~/.cargo/bin e instalar");
+        assert!(dst.is_file() && dst.parent().unwrap().is_dir());
+
+        let dst2 = base.join("home2/.cargo/bin/x");
+        place(&fonte, &dst2).expect("place também cria o diretório");
+        assert!(dst2.is_file());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[cfg(unix)]
     #[test]
     fn falha_na_troca_nao_deixa_temporario_orfao() {

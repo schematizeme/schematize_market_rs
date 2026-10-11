@@ -417,7 +417,11 @@ pub fn make_launcher() {
         return;
     }
     let apps = util::home().join(".local/share/applications");
-    let _ = std::fs::create_dir_all(&apps);
+    // Lançador é best-effort (não derruba a instalação), mas a falha é DITA, nunca engolida.
+    if let Err(e) = std::fs::create_dir_all(&apps) {
+        eprintln!("aviso: não consegui criar {}: {e}", apps.display());
+        return;
+    }
 
     // Gera o ícone em TODOS os tamanhos A PARTIR DO CÓDIGO (via o CLI `schematize icon`), para
     // o `Icon=` abaixo resolver. RESILIENTE: `make_launcher` roda em TODO update; antes ele
@@ -443,7 +447,9 @@ pub fn make_launcher() {
         guibin.display(),
         gui
     );
-    let _ = std::fs::write(apps.join("schematize-gui.desktop"), desktop);
+    if let Err(e) = std::fs::write(apps.join("schematize-gui.desktop"), desktop) {
+        eprintln!("aviso: não consegui gravar o lançador em {}: {e}", apps.display());
+    }
     // Um app, uma entrada no menu. O lançador do INTERREGNO (nome Overflow) que NÓS escrevemos
     // sai — senão sobram duas entradas e o usuário não sabe qual abrir. Só o do dir do
     // usuário: o de `/usr/share` é do pacote, não é nosso.
