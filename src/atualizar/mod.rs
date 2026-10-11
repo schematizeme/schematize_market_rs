@@ -28,6 +28,7 @@ pub mod binario;
 mod componentes;
 pub mod exibir;
 pub mod fonte;
+pub mod limpeza;
 pub mod metodo;
 pub mod purga;
 pub mod release;
@@ -36,7 +37,7 @@ pub mod versao;
 
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::plataforma;
-use componentes::{atualizar_app, atualizar_componente};
+use componentes::{atualizar_app, atualizar_componente, limpar_versoes_antigas_do_hub};
 use exibir::imprimir_plano;
 use std::path::PathBuf;
 
@@ -348,9 +349,11 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
         atualizar_app(&target).err()
     } else if let (true, Some(target)) = (a_frente, target.as_deref()) {
         exibir::avisar_a_frente("schematize", installed.as_deref(), target);
+        limpar_versoes_antigas_do_hub();
         None
     } else if let Some(target) = target.as_deref() {
         println!("{}", tf("up.app_uptodate", &[("target", target)]));
+        limpar_versoes_antigas_do_hub();
         None
     } else {
         falha_do_alvo

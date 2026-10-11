@@ -9,7 +9,8 @@
 
 use super::metodo::{self, Veredito};
 use super::{
-    alvo, binario, exibir, fonte, ou_nenhum, release, selfupdate, versao, AppGerido, Politica,
+    alvo, binario, exibir, fonte, limpeza, ou_nenhum, release, selfupdate, versao, AppGerido,
+    Politica,
 };
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::plataforma;
@@ -94,11 +95,13 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
         metodo::veredito(alvo::metodo_de(app.repo), false, instalada.as_deref(), ultima.as_deref());
     if let (false, Veredito::AFrente, Some(pub_)) = (force, ver, ultima.as_deref()) {
         exibir::avisar_a_frente(app.bin, instalada.as_deref(), pub_);
+        limpar_versoes_antigas(app);
         return;
     }
     if !force && ver != Veredito::Atualizar {
         let v = instalada.as_deref().unwrap_or("?");
         println!("{}", tf("up.comp_uptodate", &[("bin", app.bin), ("version", v)]));
+        limpar_versoes_antigas(app);
         return;
     }
     println!(
@@ -126,9 +129,12 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
             return;
         }
         let metodo = alvo::metodo_de(app.repo);
-        if let Err(e) = selfupdate::atualizar_a_si_mesmo(ultima.as_deref(), metodo) {
-            println!("{}", tf("up.self_failed", &[("error", &e)]));
+        let r = selfupdate::atualizar_a_si_mesmo(ultima.as_deref(), metodo);
+        if let Err(e) = &r {
+            println!("{}", tf("up.self_failed", &[("error", e)]));
         }
+        // D11: self-update que falhou NÃO limpa — a cópia atual é o fallback.
+        limpeza::apos(&r, &limpeza::alvo_do_app(app, e_de_binario(app)));
         return;
     }
 
@@ -179,6 +185,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
                 }
             }
             println!("✓ {}", tf("up.comp_done", &[("bin", app.bin)]));
+            limpar_versoes_antigas(app);
         }
         Err(e) => println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", &e)])),
     }
@@ -228,14 +235,38 @@ fn atualizar_por_release(app: &AppGerido, versao: &str) {
         return;
     };
     let dest = release::destino_do_app(app);
-    match release::baixar_e_instalar(&release::RedeReal, app.repo, versao, &assets, &dest) {
+    let r = release::baixar_e_instalar(&release::RedeReal, app.repo, versao, &assets, &dest);
+    match &r {
         Ok(()) => {
             metodo::registrar(app.repo, alvo::Metodo::Binario);
             aposentar_nome_legado(app);
             println!("✓ {}", tf("up.comp_done", &[("bin", app.bin)]));
         }
-        Err(e) => println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", &e)])),
+        Err(e) => println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", e)])),
     }
+    // D11: só limpa se o download+instalação deu certo — com falha, a cópia antiga é o fallback.
+    limpeza::apos(&r, &limpeza::alvo_do_app(app, e_de_binario(app)));
+}
+
+/// **O quê:** o app foi instalado por BINÁRIO (método registrado/inferido)? Então o checkout em
+/// `build/` não é usado por ele. **Onde:** [`limpar_versoes_antigas`] e o self-update.
+fn e_de_binario(app: &AppGerido) -> bool {
+    alvo::metodo_de(app.repo) == alvo::Metodo::Binario
+}
+
+/// **O quê:** remove as versões antigas de `app` (D11, compulsório) — cópias em outros diretórios
+/// do `PATH`, nomes legados, sobras e cache de build sem uso — e imprime o que saiu.
+///
+/// **Onde:** os ramos de SUCESSO de [`atualizar_componente`]: atualizado do fonte, ou já em dia.
+fn limpar_versoes_antigas(app: &AppGerido) {
+    limpeza::apos_sucesso(&limpeza::alvo_do_app(app, e_de_binario(app)));
+}
+
+/// **O quê:** o mesmo para o hub (`schematize` + `schematize-gui`). **Onde:** o fim de [`finish`]
+/// e o ramo "em dia"/"à frente" do hub em [`super::install_or_update`].
+pub(super) fn limpar_versoes_antigas_do_hub() {
+    let binario = alvo::metodo_de(plataforma::APP_REPO) == alvo::Metodo::Binario;
+    limpeza::apos_sucesso(&limpeza::alvo_do_hub(binario));
 }
 
 /// **O quê:** o binário que acabou de ser instalado reporta mesmo a versão que se pediu?
@@ -319,6 +350,7 @@ fn finish(target: &str) {
     let dir = plataforma::install_dir().display().to_string();
     println!("✓ {}", tf("up.installed_at", &[("version", &got), ("dir", &dir)]));
     println!("  {}", t("up.reopen"));
+    limpar_versoes_antigas_do_hub();
 }
 
 #[cfg(test)]

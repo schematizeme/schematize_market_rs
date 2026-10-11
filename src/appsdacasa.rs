@@ -306,9 +306,15 @@ pub fn instalar_do_release_ou_fonte(bin: &str) -> Result<(), String> {
         &release::destino_do_app(app),
         || instalar_do_fonte(bin),
     )?;
-    if matches!(via, release::Via::Release(_)) {
+    let de_binario = matches!(via, release::Via::Release(_));
+    if de_binario {
         metodo::registrar(app.repo, Metodo::Binario);
     }
+    // D11: instalação concluída = versões antigas (e, se veio de binário, o cache de build) saem.
+    // O `?` acima já impede isto numa instalação que falhou.
+    crate::atualizar::limpeza::apos_sucesso(&crate::atualizar::limpeza::alvo_do_app(
+        app, de_binario,
+    ));
     Ok(())
 }
 

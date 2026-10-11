@@ -40,6 +40,21 @@ o próprio market.
 *"não instalado → ignorado"*, com o motivo. Quem roda `update` quer o que já tem, mais novo —
 não software novo aparecendo no `~/.cargo/bin` porque a casa lançou outro produto.
 
+### Versões antigas saem, sempre (D11)
+
+Depois de um `install` ou `update` **bem-sucedido**, o market remove o que ficou para trás de
+cada app que tocou: cópias de mesmo nome em qualquer diretório do `PATH` e em `~/.cargo/bin`,
+`~/.local/bin` e `/usr/local/bin`, nomes legados (`schematize-updater`, `deployer`, `overflow`…),
+sobras (`.<nome>.bak-*`, `<nome>.old|.new|.novo|.baixado|.compilado|.tmp*`) e o checkout em
+`~/.schematize/updater/build/` de quem veio de binário. **Não há flag para desligar.** Cada
+remoção é impressa (`removido: <caminho> (versão antiga X)`), com um resumo.
+
+Nunca apaga: a cópia recém-instalada (nem symlink para ela), o `pin`, dados do usuário, nem o
+que for de pacote do sistema (`/usr/bin`…) — esse é **reportado** com o comando para tirar
+(`sudo zypper rm …`/`sudo apt remove …`; o market nunca chama `sudo`). Erro de permissão é
+dito com o caminho exato e deixa a limpeza marcada como INCOMPLETA. Update que falhou não
+limpa: a cópia antiga é o fallback.
+
 ### Como ele troca o próprio binário sem se quebrar
 
 Trocar o executável que está rodando o comando é o único modo de falha capaz de deixar a
