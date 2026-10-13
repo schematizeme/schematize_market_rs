@@ -7,6 +7,7 @@
 pub mod bin;
 pub mod config;
 pub mod desktop;
+pub mod dica_path;
 pub mod i18n;
 pub mod icone;
 pub mod util;

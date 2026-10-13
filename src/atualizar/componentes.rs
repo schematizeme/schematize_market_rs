@@ -13,7 +13,7 @@ use super::{
     alvo, binario, exibir, fonte, limpeza, ou_nenhum, release, selfupdate, versao, AppGerido,
     Politica,
 };
-use crate::nucleo::i18n::{t, tf};
+use crate::nucleo::i18n::tf;
 use crate::nucleo::plataforma;
 
 /// **O quê:** instala/atualiza o app (CLI + GUI) na versão `target`.
@@ -405,7 +405,12 @@ fn finish(target: &str) {
     let got = versao::installed_app_version().unwrap_or_else(|| target.to_string());
     let dir = plataforma::install_dir().display().to_string();
     println!("✓ {}", tf("up.installed_at", &[("version", &got), ("dir", &dir)]));
-    println!("  {}", t("up.reopen"));
+    if let Some(aviso) = crate::nucleo::dica_path::aviso_pos_instalacao(
+        &plataforma::install_dir(),
+        &crate::nucleo::util::home(),
+    ) {
+        println!("\n{aviso}");
+    }
     limpar_versoes_antigas_do_hub();
 }
 

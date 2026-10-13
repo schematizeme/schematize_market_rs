@@ -40,6 +40,13 @@ o próprio market.
 *"não instalado → ignorado"*, com o motivo. Quem roda `update` quer o que já tem, mais novo —
 não software novo aparecendo no `~/.cargo/bin` porque a casa lançou outro produto.
 
+### PATH: o market diz o comando exato
+
+Ao fim de um `install`/`update`, se `~/.cargo/bin` não está no `PATH` desta sessão, o market
+não manda "reabrir o terminal" (não resolve): imprime a linha única para o seu shell —
+`fish_add_path ~/.cargo/bin` (fish), ou o `echo 'export PATH=…' >> ~/.bashrc` / `~/.zshrc` /
+`~/.profile` (bash / zsh / outros, conforme o `$SHELL`). Já no `PATH`, não diz nada.
+
 ### Versões antigas saem, sempre (D11)
 
 Depois de um `install` ou `update` **bem-sucedido**, o market remove o que ficou para trás de

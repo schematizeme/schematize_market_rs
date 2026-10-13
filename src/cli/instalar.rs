@@ -87,7 +87,15 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
     // CANÔNICA — o PATH ainda pode apontar para outra até o próximo shell.
     let canonico = market::atualizar::APPS_GERIDOS.iter().find(|x| x.bin == a.bin);
     match canonico.and_then(|x| x.versao_instalada()) {
-        Some(versao) => println!("\n✓ {} {versao} instalado.", a.bin),
+        Some(versao) => {
+            println!("\n✓ {} {versao} instalado.", a.bin);
+            let dir = market::nucleo::plataforma::install_dir();
+            if let Some(aviso) =
+                market::nucleo::dica_path::aviso_pos_instalacao(&dir, &market::util::home())
+            {
+                println!("\n{aviso}");
+            }
+        }
         None => println!(
             "\nO build terminou, mas o `{}` ainda não responde. Rode \
              `schematize-market list` para ver o estado.",
