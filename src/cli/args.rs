@@ -61,6 +61,9 @@ pub(crate) enum Cmd {
         method: Option<String>,
         #[arg(long)]
         dry_run: bool,
+        /// Skip the confirmation prompt (required when there is no terminal).
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
     /// Switch how a language is installed. Installs the new method FIRST, then removes the old.
     Switch {

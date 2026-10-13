@@ -24,7 +24,9 @@ fn main() {
         Cmd::Install { what, all, method, dry_run, yes } => {
             cli::instalar::install_cmd(what.as_deref(), all, method, dry_run, yes)
         }
-        Cmd::Remove { what, method, dry_run } => cli::instalar::remove_cmd(&what, method, dry_run),
+        Cmd::Remove { what, method, dry_run, yes } => {
+            cli::instalar::remove_cmd(&what, method, dry_run, yes)
+        }
         Cmd::Switch { lang, to, dry_run, yes } => {
             market::environments::switch(&lang, &to, dry_run, yes)
         }

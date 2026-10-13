@@ -23,6 +23,7 @@ CMD schematize-market remove
   ARG dry_run              --dry-run
   ARG method               --method
   ARG what                  OBRIGATORIO
+  ARG yes                  --yes -y
 CMD schematize-market run
   SOBRE Launch the installed GUI by absolute path (does not depend on the desktop PATH)
 CMD schematize-market status

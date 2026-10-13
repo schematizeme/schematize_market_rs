@@ -81,11 +81,11 @@ pub fn install(lang: &str, method: Option<String>, dry_run: bool, yes: bool) -> 
     Ok(())
 }
 
-/// `schematize env remove <slug> [--method <m>] [--dry-run]`.
+/// `schematize env remove <slug> [--method <m>] [--dry-run] [-y]`.
 /// Aceita linguagem OU ferramenta; pra ferramenta o `--method` é ignorado.
-pub fn remove(lang: &str, method: Option<String>, dry_run: bool) -> Result<(), String> {
+pub fn remove(lang: &str, method: Option<String>, dry_run: bool, yes: bool) -> Result<(), String> {
     if let Some(tool) = defs::find_tool(lang) {
-        return remove_tool(tool, method, dry_run);
+        return remove_tool(tool, method, dry_run, yes);
     }
     let env = defs::find(lang).ok_or_else(|| tf("env.unknown_lang", &[("lang", lang)]))?;
     let m = Machine::probe();
@@ -119,7 +119,7 @@ pub fn remove(lang: &str, method: Option<String>, dry_run: bool) -> Result<(), S
     print_plan(env, method, &steps);
 
     // Remoção também respeita dry-run e consentimento.
-    let consent = if dry_run { false } else { confirm() };
+    let consent = if dry_run { false } else { consentir(yes)? };
     match run_steps(&steps, dry_run, consent, exec_step)? {
         PlanAction::DryRun => println!("{}", t("env.dry_run")),
         PlanAction::Aborted => println!("{}", t("env.aborted")),
@@ -176,6 +176,7 @@ pub(crate) fn remove_tool(
     tool: &Tool,
     method: Option<String>,
     dry_run: bool,
+    yes: bool,
 ) -> Result<(), String> {
     warn_method_ignored(tool, &method);
     let m = Machine::probe();
@@ -192,7 +193,7 @@ pub(crate) fn remove_tool(
     println!("{}", tf("env.tool_removing", &[("tool", tool.display)]));
     print_tool_plan(tool, &steps);
 
-    let consent = if dry_run { false } else { confirm() };
+    let consent = if dry_run { false } else { consentir(yes)? };
     match run_steps(&steps, dry_run, consent, exec_step)? {
         PlanAction::DryRun => println!("{}", t("env.dry_run")),
         PlanAction::Aborted => println!("{}", t("env.aborted")),
@@ -342,7 +343,7 @@ pub fn switch(lang: &str, para: &str, dry_run: bool, yes: bool) -> Result<(), St
     }
 
     println!("\n── 2/2: removendo o {} ──", antigo.slug());
-    if let Err(e) = remove(lang, Some(antigo.slug().to_string()), false) {
+    if let Err(e) = remove(lang, Some(antigo.slug().to_string()), false, true) {
         // Falhar aqui deixa os dois instalados. É chato e é reversível — e muito melhor que
         // o inverso. Dizer exatamente isso evita que a pessoa ache que perdeu algo.
         println!("aviso: não consegui remover o {}: {e}", antigo.slug());

@@ -47,9 +47,9 @@ Numa máquina **limpa** (nenhum app do ecossistema instalado) o `update` instala
 **uma** confirmação (ou `-y`); a falha de um não impede os outros. Quem instalou só alguns apps
 não recebe a dica e não ganha app novo — essa é a regra deliberada (`Politica::SeInstalado`).
 
-### `install` sem terminal
+### `install` e `remove` sem terminal
 
-Sem terminal para perguntar (stdin redirecionado, CI, `</dev/null`) e sem `-y`, o `install` **não
+Sem terminal para perguntar (stdin redirecionado, CI, `</dev/null`) e sem `-y`, o `install` e o `remove` (que ganhou `-y`) **não
 cancela em silêncio**: sai com código ≠ 0 e a mensagem *"sem terminal para confirmar; rode de novo
 com -y para seguir"*. Com `-y` segue; com `--dry-run` só mostra o plano.
 

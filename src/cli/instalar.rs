@@ -68,14 +68,19 @@ fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
 /// desinstalador, que sabe da entrada de desktop, do ícone e do estado em `~`. Apagar o
 /// binário daqui deixaria o ícone órfão no menu — e um ícone que abre nada é pior que um app
 /// instalado.
-pub(crate) fn remove_cmd(what: &str, method: Option<String>, dry_run: bool) -> Result<(), String> {
+pub(crate) fn remove_cmd(
+    what: &str,
+    method: Option<String>,
+    dry_run: bool,
+    yes: bool,
+) -> Result<(), String> {
     if let Some(a) = externo(what) {
         return Err(format!(
             "`{}` é um app do ecossistema; remova-o por ele mesmo:\n    {} uninstall",
             a.bin, a.bin
         ));
     }
-    environments::remove(what, method, dry_run)
+    environments::remove(what, method, dry_run, yes)
 }
 
 /// **O quê:** instala um app externo — binário pronto do release; compila só se não houver —,
@@ -162,7 +167,7 @@ mod tests {
     /// linguagem NÃO. Testado pela borda que não toca rede — `remove`, que recusa app.
     #[test]
     fn remove_recusa_app_da_casa_e_diz_por_onde() {
-        let e = remove_cmd("schematize-deployer", None, true).unwrap_err();
+        let e = remove_cmd("schematize-deployer", None, true, false).unwrap_err();
         assert!(e.contains("schematize-deployer uninstall"), "{e}");
     }
 
