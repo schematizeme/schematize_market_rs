@@ -207,16 +207,38 @@ pub fn run_shell(cmd: &str) -> Result<(), String> {
 /// Forçar `Result` nesses pontos encheria o código de `.ok()` — que é o mesmo que engolir
 /// erro com mais cerimônia.
 pub fn capture(cmd: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(cmd)
-        .args(args)
-        .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-    if out.status.success() {
-        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
-    } else {
-        None
+    capture_motivo(cmd, args).ok()
+}
+
+/// **O quê:** como [`capture`], mas devolve o MOTIVO da falha (`Err`) em vez de descartá-lo, e
+/// repete o spawn quando o SO responde ETXTBSY ("Text file busy", errno 26).
+///
+/// **Onde:** [`capture`] e `versao::consultar_versao` (que leva a causa à mensagem do usuário).
+///
+/// **Por que o retry:** quem acaba de gravar um executável e o roda logo em seguida pode
+/// esbarrar em ETXTBSY — outro processo/thread fez `fork` com o fd de escrita aberto e o filho
+/// ainda não deu `exec`. É transitório (some em milissegundos); provado em teste sob carga.
+/// Qualquer outro erro, ou ETXTBSY que persista após ~1s, volta como `Err` com a causa.
+pub fn capture_motivo(cmd: &str, args: &[&str]) -> Result<String, String> {
+    const ETXTBSY: i32 = 26;
+    let mut tentativa: u64 = 0;
+    loop {
+        let r = Command::new(cmd)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output();
+        match r {
+            Ok(out) if out.status.success() => {
+                return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
+            }
+            Ok(out) => return Err(format!("saiu com {}", out.status)),
+            Err(e) if e.raw_os_error() == Some(ETXTBSY) && tentativa < 40 => {
+                tentativa += 1;
+                std::thread::sleep(std::time::Duration::from_millis(5 * tentativa.min(5)));
+            }
+            Err(e) => return Err(format!("não consegui executar: {e}")),
+        }
     }
 }
 
@@ -399,5 +421,14 @@ mod tests {
         // Comprimentos diferentes completam com zero.
         assert!(semver_lt("1.2", "1.2.1"));
         assert!(!semver_lt("1.2.0", "1.2"));
+    }
+
+    /// **O quê:** binário inexistente devolve `Err` com a causa (não um `None` mudo).
+    /// **Onde:** guarda do piso 4 para `capture_motivo`.
+    #[test]
+    fn capture_motivo_explica_a_falha() {
+        let e = super::capture_motivo("/nao/existe/binario-xyz", &["--version"]).unwrap_err();
+        assert!(e.contains("não consegui executar"), "{e}");
+        assert!(e.contains("No such file"), "{e}");
     }
 }

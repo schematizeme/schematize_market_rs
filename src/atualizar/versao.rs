@@ -101,7 +101,17 @@ fn parece_versao(s: &str) -> bool {
 ///
 /// **Onde:** [`super::estado_dos_apps`] e o `status`.
 pub fn installed_version_of(bin: &Path) -> Option<String> {
-    versao_da_linha(&util::capture(bin.to_str()?, &["--version"])?)
+    consultar_versao(bin).ok()
+}
+
+/// **O quê:** como [`installed_version_of`], mas `Err` traz a CAUSA de não haver versão
+/// (não executou / saiu com erro / saída sem versão).
+///
+/// **Onde:** [`installed_version_of`] e `instalacao::avaliar`, que mostra a causa ao usuário.
+pub fn consultar_versao(bin: &Path) -> Result<String, String> {
+    let caminho = bin.to_str().ok_or_else(|| "caminho não é UTF-8".to_string())?;
+    let saida = util::capture_motivo(caminho, &["--version"])?;
+    versao_da_linha(&saida).ok_or_else(|| format!("saída sem versão: {saida:?}"))
 }
 
 /// **O quê:** a última versão publicada do app (CLI) PARA ESTA INSTALAÇÃO — o release com

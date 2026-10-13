@@ -81,8 +81,14 @@ pub fn avaliar<R: Rede, C: Commits>(rede: &R, commits: &C, e: &Entrada) -> Avali
         };
         return Avaliacao::Instalar(format!("{onde}; instalo em {}", canon.display()));
     }
-    let Some(local) = versao::installed_version_of(canon) else {
-        return Avaliacao::Instalar(format!("{} não responde `--version`", canon.display()));
+    let local = match versao::consultar_versao(canon) {
+        Ok(v) => v,
+        Err(causa) => {
+            return Avaliacao::Instalar(format!(
+                "{} não responde `--version` ({causa})",
+                canon.display()
+            ));
+        }
     };
     if e.metodo == Metodo::Fonte {
         return Avaliacao::JaInstalado {
