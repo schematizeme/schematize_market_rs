@@ -71,7 +71,6 @@
   "up.release_not_found": "? (dépôt introuvable sur GitHub - privé ou inexistant)",
   "up.release_rate": "? (limite de requêtes GitHub)",
   "up.release_unexpected": "? (réponse inattendue de GitHub)",
-  "up.reopen": "Si la commande `schematize` est introuvable, rouvrez le terminal pour que le PATH la prenne.",
   "up.self_failed": "avertissement : je n'ai pas pu me mettre à jour ({error}) - l'actuel reste valable.",
   "up.st_app": "app installé",
   "up.st_dir": "dossier d'installation",

@@ -71,7 +71,6 @@
   "up.release_not_found": "? (không tìm thấy kho lưu trữ trên GitHub - riêng tư hoặc không tồn tại)",
   "up.release_rate": "? (giới hạn yêu cầu của GitHub)",
   "up.release_unexpected": "? (phản hồi không mong đợi từ GitHub)",
-  "up.reopen": "Nếu không tìm thấy lệnh `schematize`, hãy mở lại terminal để PATH nhận ra nó.",
   "up.self_failed": "cảnh báo: không thể tự cập nhật ({error}) - bản hiện tại vẫn dùng được.",
   "up.st_app": "ứng dụng đã cài",
   "up.st_dir": "thư mục cài đặt",

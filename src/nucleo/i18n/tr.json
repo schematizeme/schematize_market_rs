@@ -71,7 +71,6 @@
   "up.release_not_found": "? (depo GitHub'da bulunamadı - özel veya mevcut değil)",
   "up.release_rate": "? (GitHub istek sınırı)",
   "up.release_unexpected": "? (GitHub'dan beklenmeyen yanıt)",
-  "up.reopen": "`schematize` komutu bulunamazsa, PATH'in görmesi için terminali yeniden açın.",
   "up.self_failed": "uyarı: kendimi güncelleyemedim ({error}) - mevcut olan geçerli kalıyor.",
   "up.st_app": "kurulu uygulama",
   "up.st_dir": "kurulum dizini",

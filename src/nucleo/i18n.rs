@@ -253,4 +253,34 @@ mod tests_paridade {
             );
         }
     }
+
+    /// Lê todos os `.rs` de `src/` (menos os catálogos), recursivamente. **Onde:** [`sem_chaves_orfas`].
+    fn fontes_rs(dir: &std::path::Path, out: &mut String) {
+        for e in std::fs::read_dir(dir).expect("src legível").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                fontes_rs(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push_str(&std::fs::read_to_string(&p).expect("fonte legível"));
+            }
+        }
+    }
+
+    /// O QUE: toda chave do catálogo é USADA por algum `.rs` (como literal `"chave"`).
+    ///
+    /// POR QUE: `up.reopen` ficou órfã quando a dica de PATH foi reescrita, e carregou 20
+    /// traduções mortas sem ninguém ver. Chave sem uso é tradução paga e nunca exibida.
+    #[test]
+    fn sem_chaves_orfas() {
+        let mut fonte = String::new();
+        fontes_rs(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut fonte);
+        let todos = locales();
+        let pt = &todos.iter().find(|(n, _)| n == "pt").expect("pt.json existe").1;
+        let orfas: Vec<String> = pares(pt)
+            .into_iter()
+            .map(|(k, _)| k)
+            .filter(|k| !fonte.contains(&format!("\"{k}\"")))
+            .collect();
+        assert!(orfas.is_empty(), "chaves i18n sem uso no código: {orfas:?}");
+    }
 }

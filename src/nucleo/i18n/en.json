@@ -71,7 +71,6 @@
   "up.release_not_found": "? (repository not found on GitHub - private or nonexistent)",
   "up.release_rate": "? (GitHub rate limit)",
   "up.release_unexpected": "? (unexpected GitHub response)",
-  "up.reopen": "If the `schematize` command is not found, reopen the terminal so PATH picks it up.",
   "up.self_failed": "warning: could not update myself ({error}) - the current one still works.",
   "up.st_app": "installed app",
   "up.st_dir": "install dir",

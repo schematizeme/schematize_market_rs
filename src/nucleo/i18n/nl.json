@@ -71,7 +71,6 @@
   "up.release_not_found": "? (repository niet gevonden op GitHub - privé of niet bestaand)",
   "up.release_rate": "? (GitHub-ratelimiet)",
   "up.release_unexpected": "? (onverwacht GitHub-antwoord)",
-  "up.reopen": "Als het commando `schematize` niet gevonden wordt, open de terminal opnieuw voor het PATH.",
   "up.self_failed": "waarschuwing: kon mezelf niet bijwerken ({error}) - de huidige blijft geldig.",
   "up.st_app": "geïnstalleerde app",
   "up.st_dir": "installatiemap",

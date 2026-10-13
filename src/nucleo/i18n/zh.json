@@ -71,7 +71,6 @@
   "up.release_not_found": "? (在 GitHub 上未找到仓库 - 私有或不存在)",
   "up.release_rate": "? (GitHub 请求频率限制)",
   "up.release_unexpected": "? (GitHub 返回意外响应)",
-  "up.reopen": "如果找不到 `schematize` 命令，请重新打开终端以便 PATH 生效。",
   "up.self_failed": "警告：无法更新自身（{error}）——当前版本仍然有效。",
   "up.st_app": "已安装的应用",
   "up.st_dir": "安装目录",

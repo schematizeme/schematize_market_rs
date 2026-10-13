@@ -71,7 +71,6 @@
   "up.release_not_found": "? (مخزن در GitHub پیدا نشد - خصوصی یا ناموجود)",
   "up.release_rate": "? (محدودیت نرخ درخواست GitHub)",
   "up.release_unexpected": "? (پاسخ غیرمنتظره از GitHub)",
-  "up.reopen": "اگر فرمان `schematize` پیدا نشد، ترمینال را دوباره باز کنید تا PATH اعمال شود.",
   "up.self_failed": "هشدار: نتوانستم خودم را به‌روز کنم ({error}) - نسخهٔ فعلی همچنان معتبر است.",
   "up.st_app": "برنامهٔ نصب‌شده",
   "up.st_dir": "پوشهٔ نصب",

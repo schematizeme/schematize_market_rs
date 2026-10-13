@@ -71,7 +71,6 @@
   "up.release_not_found": "? (المستودع غير موجود على GitHub - خاص أو غير موجود)",
   "up.release_rate": "? (حد الطلبات في GitHub)",
   "up.release_unexpected": "? (استجابة غير متوقعة من GitHub)",
-  "up.reopen": "إذا لم يُعثر على الأمر `schematize`، أعد فتح الطرفية ليأخذ PATH مفعوله.",
   "up.self_failed": "تحذير: لم أستطع تحديث نفسي ({error}) - النسخة الحالية ما زالت صالحة.",
   "up.st_app": "التطبيق المثبَّت",
   "up.st_dir": "مجلد التثبيت",
