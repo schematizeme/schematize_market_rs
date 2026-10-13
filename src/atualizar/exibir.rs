@@ -21,11 +21,7 @@ use crate::nucleo::rede::Causa;
 /// ([`Politica::SeInstalado`]); quem quer o conjunto todo pede `install --all`.
 pub(super) fn dica_ecossistema_vazio(plano: &Plano) -> Option<String> {
     let ha_app = plano.componentes.iter().any(|c| c.politica == Politica::SeInstalado);
-    (!ha_app).then(|| {
-        "nenhum app do ecossistema instalado; rode `schematize-market install --all` \
-         para instalar os apps (deployer, optimizer, database, git, skills, overdev)"
-            .to_string()
-    })
+    (!ha_app).then(|| t("up.no_ecosystem"))
 }
 
 /// **O quê:** imprime o que aconteceria, sem mexer em nada. **Onde:** `install_or_update`

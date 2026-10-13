@@ -48,9 +48,11 @@ pub fn confirm() -> bool {
     matches!(line.trim().to_lowercase().as_str(), "y" | "yes" | "s" | "sim")
 }
 
-/// Mensagem de quando não há terminal para perguntar e `-y` não foi dado.
-pub const MSG_SEM_TERMINAL: &str =
-    "sem terminal para confirmar; rode de novo com -y para seguir (ou --dry-run para só ver o plano)";
+/// **O quê:** mensagem (no idioma ativo) de quando não há terminal para perguntar e `-y` não
+/// foi dado. **Onde:** [`consentir_com`].
+pub fn msg_sem_terminal() -> String {
+    t("env.no_tty")
+}
 
 /// **O quê:** decide o consentimento SEM nunca cancelar em silêncio: `-y` segue; sem `-y` e com
 /// terminal, pergunta (via `perguntar`); sem `-y` e sem terminal, devolve erro acionável que
@@ -66,7 +68,7 @@ pub fn consentir_com(
         return Ok(true);
     }
     if !tem_tty {
-        return Err(MSG_SEM_TERMINAL.to_string());
+        return Err(msg_sem_terminal());
     }
     Ok(perguntar())
 }

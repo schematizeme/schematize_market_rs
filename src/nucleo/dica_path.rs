@@ -10,6 +10,7 @@
 //! fish) a pasta nunca entrou no PATH e o aviso "reabra o terminal" não resolvia nada. Isto
 //! não edita rc de shell: o fish não tem rc que o market conheça, então dizemos o comando.
 
+use crate::nucleo::i18n::tf;
 use std::path::Path;
 
 /// **O quê:** normaliza uma entrada de PATH para comparar: expande `~` e `$HOME`, tira barras
@@ -51,11 +52,11 @@ pub fn orientar_path(path: &str, dir: &Path, home: &Path, shell: &str) -> Option
         "zsh" => (Some("~/.zshrc"), linha_export("~/.zshrc")),
         _ => (Some("~/.profile"), linha_export("~/.profile")),
     };
-    let onde = arquivo.map(|a| format!(" (fica salvo em {a})")).unwrap_or_default();
-    Some(format!(
-        "A pasta {} ainda não está no seu PATH — por isso o comando pode não ser achado, e \
-         reabrir o terminal sozinho não resolve.\nPara resolver, rode esta linha uma vez{onde}:\n    {comando}",
-        dir.display()
+    let salvo =
+        arquivo.map(|a| format!(" {}", tf("path.saved_in", &[("file", a)]))).unwrap_or_default();
+    Some(tf(
+        "path.hint",
+        &[("dir", &dir.display().to_string()), ("saved", &salvo), ("command", &comando)],
     ))
 }
 

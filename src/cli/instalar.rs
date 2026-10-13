@@ -12,6 +12,7 @@
 use market::appsdacasa::{externo, instalar_app_da_casa, registrar_no_menu, EXTERNOS};
 use market::atualizar::instalacao::Resultado;
 use market::environments;
+use market::nucleo::i18n::{t, tf};
 
 /// **O quê:** instala um app da casa, uma linguagem ou uma ferramenta de dev — ou, com
 /// `--all`, todos os apps do ecossistema.
@@ -27,7 +28,7 @@ pub(crate) fn install_cmd(
         (_, true) => instalar_todos(dry_run, yes),
         (Some(w), false) if externo(w).is_some() => instalar_app(w, dry_run, yes),
         (Some(w), false) => environments::install(w, method, dry_run, yes),
-        (None, false) => Err("diga o que instalar (ex.: `install go`) ou use `--all`".into()),
+        (None, false) => Err(t("install.what_missing")),
     }
 }
 
@@ -43,22 +44,25 @@ fn conjunto_completo() -> Vec<&'static str> {
 /// **Onde:** [`install_cmd`] com `--all` — o que a dica do `update` numa máquina limpa manda rodar.
 fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
     let nomes = conjunto_completo();
-    println!("Vou instalar os {} apps do ecossistema: {}", nomes.len(), nomes.join(", "));
+    println!(
+        "{}",
+        tf("install.all_intro", &[("n", &nomes.len().to_string()), ("apps", &nomes.join(", "))])
+    );
     if !dry_run && !environments::consentir(yes)? {
-        println!("cancelado — nada foi feito.");
+        println!("{}", t("install.cancelled"));
         return Ok(());
     }
     let mut falhas = Vec::new();
     for n in &nomes {
         if let Err(e) = instalar_app(n, dry_run, true) {
-            eprintln!("erro em {n}: {e}");
+            eprintln!("{}", tf("install.all_error", &[("app", n), ("error", &e)]));
             falhas.push(*n);
         }
     }
     if falhas.is_empty() {
         Ok(())
     } else {
-        Err(format!("não consegui instalar: {}", falhas.join(", ")))
+        Err(tf("install.all_failed", &[("apps", &falhas.join(", "))]))
     }
 }
 
@@ -128,7 +132,7 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
             return Ok(());
         }
         Resultado::Cancelado => {
-            println!("cancelado — nada foi feito.");
+            println!("{}", t("install.cancelled"));
             return Ok(());
         }
         Resultado::NaoConfirmado { .. } | Resultado::SoSimulou => return Ok(()),
