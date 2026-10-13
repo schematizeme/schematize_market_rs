@@ -220,7 +220,7 @@ pub fn capture(cmd: &str, args: &[&str]) -> Option<String> {
 /// ainda não deu `exec`. É transitório (some em milissegundos); provado em teste sob carga.
 /// Qualquer outro erro, ou ETXTBSY que persista após ~1s, volta como `Err` com a causa.
 pub fn capture_motivo(cmd: &str, args: &[&str]) -> Result<String, String> {
-    const ETXTBSY: i32 = 26;
+    const ETXTBSY: i32 = 26; // errno no Linux/macOS; no Windows o 26 é outro erro (cfg!(unix) abaixo)
     let mut tentativa: u64 = 0;
     loop {
         let r = Command::new(cmd)
@@ -233,7 +233,7 @@ pub fn capture_motivo(cmd: &str, args: &[&str]) -> Result<String, String> {
                 return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
             }
             Ok(out) => return Err(format!("saiu com {}", out.status)),
-            Err(e) if e.raw_os_error() == Some(ETXTBSY) && tentativa < 40 => {
+            Err(e) if cfg!(unix) && e.raw_os_error() == Some(ETXTBSY) && tentativa < 40 => {
                 tentativa += 1;
                 std::thread::sleep(std::time::Duration::from_millis(5 * tentativa.min(5)));
             }
