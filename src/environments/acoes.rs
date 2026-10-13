@@ -59,7 +59,7 @@ pub fn install(lang: &str, method: Option<String>, dry_run: bool, yes: bool) -> 
     }
 
     // Consentimento (deny-by-default): dry-run não executa; senão --yes ou confirmação.
-    let consent = if dry_run { false } else { yes || confirm() };
+    let consent = if dry_run { false } else { consentir(yes)? };
     match run_steps(&steps, dry_run, consent, exec_step)? {
         PlanAction::DryRun => {
             println!("{}", t("env.dry_run"));
@@ -158,7 +158,7 @@ pub(crate) fn install_tool(
     print_tool_plan(tool, &steps);
 
     // Consentimento (deny-by-default): dry-run não executa; senão --yes ou confirmação.
-    let consent = if dry_run { false } else { yes || confirm() };
+    let consent = if dry_run { false } else { consentir(yes)? };
     match run_steps(&steps, dry_run, consent, exec_step)? {
         PlanAction::DryRun => println!("{}", t("env.dry_run")),
         PlanAction::Aborted => println!("{}", t("env.aborted")),

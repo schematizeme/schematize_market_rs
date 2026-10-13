@@ -61,23 +61,37 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
     // D12: quem decide é a cópia CANÔNICA (`~/.cargo/bin`) contra o release — uma cópia velha
     // achada pelo PATH não conta como instalada. O banner e a confirmação só aparecem se há o
     // que instalar.
+    let sem_terminal: std::cell::Cell<Option<String>> = std::cell::Cell::new(None);
     let banner = |_motivo: &str| {
         println!("Vou instalar o `{}` — {}", a.bin, a.sobre);
         println!();
         println!("  Baixo o binário pronto do release (segundos, sem compilar). Só se o app");
         println!("  ainda não tiver binário para esta máquina é que eu compilo do fonte —");
         println!("  e aí leva minutos e pode pedir sudo para as bibliotecas de build.");
-        yes || environments::confirm()
+        match environments::consentir(yes) {
+            Ok(c) => c,
+            Err(m) => {
+                sem_terminal.set(Some(m));
+                false
+            }
+        }
     };
-    match instalar_app_da_casa(a.bin, dry_run, banner)? {
+    let resultado = instalar_app_da_casa(a.bin, dry_run, banner)?;
+    // Sem terminal e sem `-y`: não é cancelamento da pessoa, é falta de como perguntar.
+    if let Some(m) = sem_terminal.take() {
+        return Err(m);
+    }
+    match resultado {
         Resultado::JaInstalado { .. } => {
             println!("Para atualizar, rode:");
             println!("    schematize-market update");
             return Ok(());
         }
-        Resultado::NaoConfirmado { .. } | Resultado::SoSimulou | Resultado::Cancelado => {
+        Resultado::Cancelado => {
+            println!("cancelado — nada foi feito.");
             return Ok(());
         }
+        Resultado::NaoConfirmado { .. } | Resultado::SoSimulou => return Ok(()),
         Resultado::Instalado(_) => {}
     }
     registrar_no_menu(a.bin);

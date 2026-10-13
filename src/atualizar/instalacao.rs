@@ -174,7 +174,6 @@ pub fn instalar_com<R: Rede, C: Commits>(
         return Ok(Resultado::SoSimulou);
     }
     if !confirmar(&motivo) {
-        println!("cancelado — nada foi feito.");
         return Ok(Resultado::Cancelado);
     }
     let via = release::instalar_ou_fonte(rede, e.repo, e.assets, e.dest, fonte)?;

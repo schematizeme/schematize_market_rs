@@ -48,6 +48,35 @@ pub fn confirm() -> bool {
     matches!(line.trim().to_lowercase().as_str(), "y" | "yes" | "s" | "sim")
 }
 
+/// Mensagem de quando não há terminal para perguntar e `-y` não foi dado.
+pub const MSG_SEM_TERMINAL: &str =
+    "sem terminal para confirmar; rode de novo com -y para seguir (ou --dry-run para só ver o plano)";
+
+/// **O quê:** decide o consentimento SEM nunca cancelar em silêncio: `-y` segue; sem `-y` e com
+/// terminal, pergunta (via `perguntar`); sem `-y` e sem terminal, devolve erro acionável que
+/// nomeia o `-y` — a pergunta nem é feita.
+///
+/// **Onde:** [`consentir`] (stdin real) e a suíte (`tem_tty` injetado).
+pub fn consentir_com(
+    yes: bool,
+    tem_tty: bool,
+    perguntar: impl FnOnce() -> bool,
+) -> Result<bool, String> {
+    if yes {
+        return Ok(true);
+    }
+    if !tem_tty {
+        return Err(MSG_SEM_TERMINAL.to_string());
+    }
+    Ok(perguntar())
+}
+
+/// **O quê:** [`consentir_com`] com o `stdin` real e a pergunta [`confirm`].
+/// **Onde:** `install` de linguagem/ferramenta ([`acoes`]) antes do plano ser executado.
+pub fn consentir(yes: bool) -> Result<bool, String> {
+    consentir_com(yes, io::IsTerminal::is_terminal(&io::stdin()), confirm)
+}
+
 /// O que fazer com um plano depois de exibido — decisão PURA (testável sem I/O).
 #[derive(Debug, PartialEq, Eq)]
 pub enum PlanAction {
@@ -102,5 +131,33 @@ pub(crate) fn print_docker_usage(env: &Env, img: &str) {
 pub(crate) fn warn_method_ignored(tool: &Tool, method: &Option<String>) {
     if let Some(mm) = method {
         println!("{}", tf("env.tool_method_ignored", &[("tool", tool.display), ("method", mm)]));
+    }
+}
+
+#[cfg(test)]
+mod testes_consentimento {
+    use super::*;
+
+    /// Sem TTY e sem `-y`: erro que nomeia `-y`, e a pergunta NUNCA é feita.
+    #[test]
+    fn sem_tty_sem_yes_erra_nomeando_o_y() {
+        let e =
+            consentir_com(false, false, || panic!("não pode perguntar sem terminal")).unwrap_err();
+        assert!(e.contains("-y"), "{e}");
+    }
+
+    /// `-y` segue com ou sem terminal, sem perguntar.
+    #[test]
+    fn yes_segue_sem_perguntar() {
+        for tty in [true, false] {
+            assert_eq!(consentir_com(true, tty, || panic!("não pergunta")), Ok(true));
+        }
+    }
+
+    /// Com terminal e sem `-y`, a resposta da pessoa decide.
+    #[test]
+    fn com_tty_a_resposta_decide() {
+        assert_eq!(consentir_com(false, true, || true), Ok(true));
+        assert_eq!(consentir_com(false, true, || false), Ok(false));
     }
 }

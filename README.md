@@ -40,6 +40,12 @@ o próprio market.
 *"não instalado → ignorado"*, com o motivo. Quem roda `update` quer o que já tem, mais novo —
 não software novo aparecendo no `~/.cargo/bin` porque a casa lançou outro produto.
 
+### `install` sem terminal
+
+Sem terminal para perguntar (stdin redirecionado, CI, `</dev/null`) e sem `-y`, o `install` **não
+cancela em silêncio**: sai com código ≠ 0 e a mensagem *"sem terminal para confirmar; rode de novo
+com -y para seguir"*. Com `-y` segue; com `--dry-run` só mostra o plano.
+
 ### PATH: o market diz o comando exato
 
 Ao fim de um `install`/`update`, se `~/.cargo/bin` não está no `PATH` desta sessão, o market
