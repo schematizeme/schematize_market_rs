@@ -332,6 +332,9 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
             (None, Some(msg)) => println!("{msg}"),
             (None, None) => {}
         }
+        if let Some(d) = exibir::dica_ecossistema_vazio(&plano) {
+            println!("\n{d}");
+        }
         return Ok(());
     }
 
@@ -374,6 +377,9 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
     }
 
     aposentar_o_updater();
+    if let Some(d) = exibir::dica_ecossistema_vazio(&plano) {
+        println!("\n{d}");
+    }
 
     match falha_do_app {
         Some(e) => Err(e),

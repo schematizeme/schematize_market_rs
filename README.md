@@ -6,6 +6,7 @@ Instala e remove programas. Só isso, e bem.
 schematize-market list                          # tudo que dá pra instalar, e o que já está
 schematize-market install go --method mise
 schematize-market install schematize-deployer
+schematize-market install --all                  # os 6 apps do ecossistema
 schematize-market switch rust --to official
 schematize-market desktop --install             # ícone no menu de aplicativos
 
@@ -39,6 +40,12 @@ o próprio market.
 **Não faz:** instalar o que ninguém pediu. Um app ausente aparece no `--dry-run` como
 *"não instalado → ignorado"*, com o motivo. Quem roda `update` quer o que já tem, mais novo —
 não software novo aparecendo no `~/.cargo/bin` porque a casa lançou outro produto.
+
+Numa máquina **limpa** (nenhum app do ecossistema instalado) o `update` instala só o hub e diz:
+*"nenhum app do ecossistema instalado; rode `schematize-market install --all`"*. O
+`install --all` instala os seis apps (deployer, optimizer, database, git, skills, overdev) com
+**uma** confirmação (ou `-y`); a falha de um não impede os outros. Quem instalou só alguns apps
+não recebe a dica e não ganha app novo — essa é a regra deliberada (`Politica::SeInstalado`).
 
 ### `install` sem terminal
 

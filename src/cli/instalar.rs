@@ -13,17 +13,52 @@ use market::appsdacasa::{externo, instalar_app_da_casa, registrar_no_menu, EXTER
 use market::atualizar::instalacao::Resultado;
 use market::environments;
 
-/// **O quê:** instala um app da casa, uma linguagem ou uma ferramenta de dev.
-/// **Onde:** `schematize-market install <what>`.
+/// **O quê:** instala um app da casa, uma linguagem ou uma ferramenta de dev — ou, com
+/// `--all`, todos os apps do ecossistema.
+/// **Onde:** `schematize-market install <what>` / `install --all`.
 pub(crate) fn install_cmd(
-    what: &str,
+    what: Option<&str>,
+    all: bool,
     method: Option<String>,
     dry_run: bool,
     yes: bool,
 ) -> Result<(), String> {
-    match externo(what) {
-        Some(_) => instalar_app(what, dry_run, yes),
-        None => environments::install(what, method, dry_run, yes),
+    match (what, all) {
+        (_, true) => instalar_todos(dry_run, yes),
+        (Some(w), false) if externo(w).is_some() => instalar_app(w, dry_run, yes),
+        (Some(w), false) => environments::install(w, method, dry_run, yes),
+        (None, false) => Err("diga o que instalar (ex.: `install go`) ou use `--all`".into()),
+    }
+}
+
+/// **O quê:** os binários do conjunto `--all` — os apps da tabela [`EXTERNOS`].
+/// **Onde:** [`instalar_todos`] e a suíte.
+fn conjunto_completo() -> Vec<&'static str> {
+    EXTERNOS.iter().map(|a| a.bin).collect()
+}
+
+/// **O quê:** instala todos os apps do ecossistema, pedindo UM consentimento (ou `-y`). Cada
+/// app é independente: a falha de um não impede os outros, e o erro sobe no fim (exit != 0).
+///
+/// **Onde:** [`install_cmd`] com `--all` — o que a dica do `update` numa máquina limpa manda rodar.
+fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
+    let nomes = conjunto_completo();
+    println!("Vou instalar os {} apps do ecossistema: {}", nomes.len(), nomes.join(", "));
+    if !dry_run && !environments::consentir(yes)? {
+        println!("cancelado — nada foi feito.");
+        return Ok(());
+    }
+    let mut falhas = Vec::new();
+    for n in &nomes {
+        if let Err(e) = instalar_app(n, dry_run, true) {
+            eprintln!("erro em {n}: {e}");
+            falhas.push(*n);
+        }
+    }
+    if falhas.is_empty() {
+        Ok(())
+    } else {
+        Err(format!("não consegui instalar: {}", falhas.join(", ")))
     }
 }
 
@@ -137,6 +172,23 @@ mod tests {
     fn linguagem_nao_e_tratada_como_app() {
         assert!(externo("go").is_none());
         assert!(externo("rust").is_none());
+    }
+
+    /// `--all` cobre exatamente os 6 apps do ecossistema, todos instaláveis pelo nome.
+    #[test]
+    fn all_cobre_os_seis_apps_do_ecossistema() {
+        let n = conjunto_completo();
+        assert_eq!(n.len(), 6, "{n:?}");
+        for b in ["deployer", "optimizer", "database", "git", "skills", "overdev"] {
+            assert!(n.contains(&format!("schematize-{b}").as_str()), "falta {b}");
+        }
+    }
+
+    /// Sem alvo e sem `--all` é erro acionável, não pânico nem no-op.
+    #[test]
+    fn sem_alvo_e_sem_all_diz_o_que_fazer() {
+        let e = install_cmd(None, false, None, true, true).unwrap_err();
+        assert!(e.contains("--all"), "{e}");
     }
 
     /// Nome fora da tabela não vira flag para um script com sudo.

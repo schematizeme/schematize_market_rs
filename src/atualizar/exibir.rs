@@ -8,9 +8,25 @@
 use super::alvo::Metodo;
 use super::metodo::Origem;
 use super::metodo::{self, Veredito};
-use super::{alvo, ou_nenhum, Plano, APPS_GERIDOS};
+use super::{alvo, ou_nenhum, Plano, Politica, APPS_GERIDOS};
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::rede::Causa;
+
+/// **O quê:** a dica de "nenhum app do ecossistema instalado", ou `None` se há ao menos um.
+/// Função PURA sobre o [`Plano`]: o market (`Politica::Sempre`) está sempre no plano e não
+/// conta como "ecossistema".
+///
+/// **Onde:** [`super::install_or_update`], logo após o plano/`--dry-run` e ao fim do `update`.
+/// **Por que só dica e não instalar:** `update` não instala o que ninguém pediu
+/// ([`Politica::SeInstalado`]); quem quer o conjunto todo pede `install --all`.
+pub(super) fn dica_ecossistema_vazio(plano: &Plano) -> Option<String> {
+    let ha_app = plano.componentes.iter().any(|c| c.politica == Politica::SeInstalado);
+    (!ha_app).then(|| {
+        "nenhum app do ecossistema instalado; rode `schematize-market install --all` \
+         para instalar os apps (deployer, optimizer, database, git, skills, overdev)"
+            .to_string()
+    })
+}
 
 /// **O quê:** imprime o que aconteceria, sem mexer em nada. **Onde:** `install_or_update`
 /// com `--dry-run`.
@@ -175,6 +191,17 @@ pub fn campos_json(v: &Versoes) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Máquina limpa (só o hub): o `update` avisa e nomeia o comando; com um app instalado, cala.
+    #[test]
+    fn dica_so_quando_nenhum_app_do_ecossistema_esta_instalado() {
+        let limpa = crate::atualizar::planejar(false, Some("1.0.0"), "1.0.0", &[]);
+        let d = dica_ecossistema_vazio(&limpa).expect("máquina limpa deve receber a dica");
+        assert!(d.contains("schematize-market install --all"), "{d}");
+        let git = APPS_GERIDOS.iter().find(|a| a.bin == "schematize-git").unwrap();
+        let parcial = crate::atualizar::planejar(false, Some("1.0.0"), "1.0.0", &[git]);
+        assert_eq!(dica_ecossistema_vazio(&parcial), None, "instalou só alguns: não insiste");
+    }
 
     fn v(rel: Result<Option<&str>, Causa>, main: Option<&str>, m: Metodo, o: Origem) -> Versoes {
         Versoes {

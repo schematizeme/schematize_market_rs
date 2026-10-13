@@ -21,8 +21,8 @@ fn main() {
     let cli = Cli::parse();
     let r = match cli.cmd {
         Cmd::List { wait, json } => cli::lista::list_cmd(wait, json),
-        Cmd::Install { what, method, dry_run, yes } => {
-            cli::instalar::install_cmd(&what, method, dry_run, yes)
+        Cmd::Install { what, all, method, dry_run, yes } => {
+            cli::instalar::install_cmd(what.as_deref(), all, method, dry_run, yes)
         }
         Cmd::Remove { what, method, dry_run } => cli::instalar::remove_cmd(&what, method, dry_run),
         Cmd::Switch { lang, to, dry_run, yes } => {
