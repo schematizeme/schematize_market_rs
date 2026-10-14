@@ -33,6 +33,7 @@ use super::alvo::Metodo;
 use super::metodo::mesmo_commit;
 use super::AppGerido;
 use crate::ctx::Ctx;
+use crate::nucleo::plataforma;
 use crate::nucleo::rede::Causa;
 use crate::nucleo::{bin, rede, util};
 use std::path::Path;
@@ -213,6 +214,19 @@ pub fn commit_do_release<C: Commits>(
     repo: &str,
     tag: &str,
 ) -> Result<String, (Causa, String)> {
+    commit_do_release_em(c, repo, tag, plataforma::os())
+}
+
+/// **O quê:** [`commit_do_release`] para um SO dado: o commit da tag é lido do repo de ORIGEM do
+/// release naquele SO ([`plataforma::repo_de_release_para`]) — no Windows, market e overdev vêm
+/// do `schematize_windows_rs`, e o `.exe` embute o SHA desse repo. **Onde:** o de cima e os testes.
+pub fn commit_do_release_em<C: Commits>(
+    c: &C,
+    repo: &str,
+    tag: &str,
+    os: plataforma::Os,
+) -> Result<String, (Causa, String)> {
+    let repo = plataforma::repo_de_release_para(repo, os);
     if !c.git_no_path() {
         let sha = c.api_commit(repo, tag)?;
         let sha = sha.trim();
@@ -732,5 +746,36 @@ mod tests {
         assert!(m.contains("schematize-git") && m.contains("0.1.0"), "{m}");
         assert!(m.contains("73847f7aabbc") && m.contains("a36d638d233f"), "{m}");
         assert!(m.contains("release"), "{m}");
+    }
+
+    /// No Windows, market e overdev comparam com a tag do `schematize_windows_rs`; no resto, e
+    /// para os demais apps, com o próprio repo.
+    #[test]
+    fn commit_do_release_roteia_o_repo_por_so() {
+        use std::cell::RefCell;
+        struct Grava(RefCell<Vec<String>>);
+        impl Commits for Grava {
+            fn git_no_path(&self) -> bool {
+                true
+            }
+            fn ls_remote(&self, repo: &str, _: &[String]) -> Result<String, (Causa, String)> {
+                self.0.borrow_mut().push(repo.to_string());
+                Ok(format!("{}\trefs/tags/v1.0.0^{{}}\n", "a".repeat(40)))
+            }
+            fn api_commit(&self, _: &str, _: &str) -> Result<String, (Causa, String)> {
+                unreachable!()
+            }
+        }
+        let g = Grava(RefCell::new(vec![]));
+        let casos = [
+            (plataforma::MARKET_REPO, plataforma::Os::Windows, plataforma::WINDOWS_REPO),
+            (plataforma::OVERDEV_REPO, plataforma::Os::Windows, plataforma::WINDOWS_REPO),
+            (plataforma::MARKET_REPO, plataforma::Os::Linux, plataforma::MARKET_REPO),
+            (plataforma::DEPLOYER_REPO, plataforma::Os::Windows, plataforma::DEPLOYER_REPO),
+        ];
+        for (repo, os, esperado) in casos {
+            commit_do_release_em(&g, repo, "v1.0.0", os).unwrap();
+            assert_eq!(g.0.borrow().last().unwrap(), esperado, "{repo} {os:?}");
+        }
     }
 }
