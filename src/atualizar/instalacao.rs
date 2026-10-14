@@ -162,7 +162,7 @@ pub fn instalar_com<R: Rede, C: Commits>(
     rede: &R,
     commits: &C,
     e: &Entrada,
-    amb: &Ambiente,
+    amb: &Ambiente<'_>,
     alvo_limpeza: &dyn Fn(bool) -> Alvo,
     dry_run: bool,
     confirmar: impl FnOnce(&str) -> bool,
@@ -280,7 +280,7 @@ mod tests {
         canon: PathBuf,
         velha: PathBuf,
         dest: Destino,
-        amb: Ambiente,
+        amb: Ambiente<'static>,
     }
     fn mundo(nome: &str) -> Mundo {
         let base = std::env::temp_dir().join(format!("market-inst-{nome}-{}", std::process::id()));
@@ -294,7 +294,7 @@ mod tests {
             dirs_sistema: vec![],
             state_dir: base.join("estado"),
             protegidos: vec![],
-            remover: limpeza::remover_real,
+            remover: Box::new(limpeza::remover_real),
             dono_do_pacote: nenhum_dono,
         };
         let dest = Destino { cli: cargo.join(BIN), gui: None, tmp: base.join("dl") };

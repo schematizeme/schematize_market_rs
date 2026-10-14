@@ -379,11 +379,11 @@ pub fn install_or_update(ctx: &Ctx, force: bool, dry_run: bool) -> Result<(), St
         atualizar_app(ctx, &target).err()
     } else if let (true, Some(target)) = (a_frente, target.as_deref()) {
         exibir::avisar_a_frente("schematize", installed.as_deref(), target);
-        limpar_versoes_antigas_do_hub();
+        limpar_versoes_antigas_do_hub(ctx);
         None
     } else if let Some(target) = target.as_deref() {
         println!("{}", tf("up.app_uptodate", &[("target", target)]));
-        limpar_versoes_antigas_do_hub();
+        limpar_versoes_antigas_do_hub(ctx);
         None
     } else {
         falha_do_alvo

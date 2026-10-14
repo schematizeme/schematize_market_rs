@@ -52,6 +52,7 @@
 //! 8. No Windows um `.exe` em uso não se apaga: vira `<nome>.old` e sai na próxima execução.
 
 use super::{AppGerido, Politica};
+use crate::ctx::Ctx;
 use crate::nucleo::{plataforma, util};
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -91,10 +92,13 @@ pub struct Alvo {
     pub limpar_cache: bool,
 }
 
+/// Função que remove um arquivo; `Some(novo)` se só o renomeou.
+pub type Remover<'a> = Box<dyn Fn(&Path) -> io::Result<Option<PathBuf>> + 'a>;
+
 /// **O quê:** o mundo em que a limpeza roda — injetável, para os testes nunca tocarem no real.
 ///
 /// **Onde:** [`limpar_em`]; produção usa [`Ambiente::real`].
-pub struct Ambiente {
+pub struct Ambiente<'a> {
     /// Diretórios do `PATH` (só os absolutos valem).
     pub path_dirs: Vec<PathBuf>,
     /// `~/.cargo/bin` e `~/.local/bin` — onde nomes genéricos também se apagam.
@@ -108,15 +112,15 @@ pub struct Ambiente {
     /// Caminhos que jamais se apagam (o binário em execução).
     pub protegidos: Vec<PathBuf>,
     /// Remove um arquivo; devolve `Some(novo)` se só o renomeou (Windows, em uso).
-    pub remover: fn(&Path) -> io::Result<Option<PathBuf>>,
+    pub remover: Remover<'a>,
     /// Qual pacote do sistema é dono do arquivo, se der para saber.
     pub dono_do_pacote: fn(&Path) -> Option<String>,
 }
 
-impl Ambiente {
+impl<'a> Ambiente<'a> {
     /// **O quê:** o ambiente desta máquina: `PATH`, `HOME`, diretórios do sistema.
     /// **Onde:** [`apos`] e [`apos_sucesso`].
-    pub fn real() -> Self {
+    pub fn real(ctx: &'a Ctx<'a>) -> Self {
         let home = util::home();
         let path_dirs = std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).collect())
@@ -129,7 +133,9 @@ impl Ambiente {
             dirs_sistema: sistema.iter().map(PathBuf::from).collect(),
             state_dir: plataforma::state_dir(),
             protegidos: std::env::current_exe().into_iter().collect(),
-            remover: remover_real,
+            remover: Box::new(|p| {
+                ctx.plat.substituicao.remover(p).map(|()| None).map_err(io::Error::other)
+            }),
             dono_do_pacote: dono_do_pacote_real,
         }
     }
@@ -342,10 +348,10 @@ pub fn eh_janela(nome: &str) -> bool {
     nome.strip_suffix(".exe").unwrap_or(nome).ends_with("-gui")
 }
 
-/// **O quê:** remove `p`. Nunca segue symlink: `remove_file` apaga o link. O retorno
-/// `Some(novo_caminho)` existe para quem aposenta o arquivo em vez de apagá-lo (o Windows, em
-/// `schematize_windows_rs`); aqui é sempre `None`.
-/// **Onde:** [`Ambiente::real`].
+/// **O quê:** remove `p` com `std::fs::remove_file` (sem a costura). **Onde:** só os testes,
+/// que montam um [`Ambiente`] de sandbox; em produção a remoção é `plat.substituicao.remover`
+/// (o Windows aposenta o `.exe` em uso como `.old`).
+#[cfg(test)]
 pub(crate) fn remover_real(p: &Path) -> io::Result<Option<PathBuf>> {
     std::fs::remove_file(p).map(|()| None)
 }
@@ -548,7 +554,7 @@ pub fn limpar_em(amb: &Ambiente, alvo: &Alvo) -> Relatorio {
 /// **O quê:** o que [`varrer_dir`] e [`tratar`] precisam saber do diretório em curso.
 /// **Onde:** [`limpar_em`].
 struct Contexto<'a> {
-    amb: &'a Ambiente,
+    amb: &'a Ambiente<'a>,
     prot: &'a BTreeSet<PathBuf>,
     de_usuario: bool,
     de_sistema: bool,
@@ -684,16 +690,16 @@ pub fn apos_em<T, E>(amb: &Ambiente, resultado: &Result<T, E>, alvo: &Alvo) -> O
 
 /// **O quê:** [`apos_em`] no ambiente REAL, imprimindo o relatório.
 /// **Onde:** os pontos de [`super::componentes`] que têm um `Result`.
-pub fn apos<T, E>(resultado: &Result<T, E>, alvo: &Alvo) -> Option<Relatorio> {
-    let rel = apos_em(&Ambiente::real(), resultado, alvo)?;
+pub fn apos<T, E>(ctx: &Ctx, resultado: &Result<T, E>, alvo: &Alvo) -> Option<Relatorio> {
+    let rel = apos_em(&Ambiente::real(ctx), resultado, alvo)?;
     rel.imprimir();
     Some(rel)
 }
 
 /// **O quê:** limpa no ambiente real, para quem já está num ramo de sucesso. Imprime.
 /// **Onde:** fim de instalação/atualização bem-sucedida.
-pub fn apos_sucesso(alvo: &Alvo) -> Relatorio {
-    let rel = limpar_em(&Ambiente::real(), alvo);
+pub fn apos_sucesso(ctx: &Ctx, alvo: &Alvo) -> Relatorio {
+    let rel = limpar_em(&Ambiente::real(ctx), alvo);
     rel.imprimir();
     rel
 }

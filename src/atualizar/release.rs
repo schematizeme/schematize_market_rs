@@ -122,7 +122,8 @@ pub enum Consulta {
 ///
 /// **Onde:** [`instalar_ou_fonte`] e [`super::alvo::consultar_publicado`].
 pub fn consultar<R: Rede>(rede: &R, repo: &str, assets: &Assets) -> Consulta {
-    let url = match rede.ultimo_release(repo) {
+    let origem = plataforma::repo_de_release(repo);
+    let url = match rede.ultimo_release(origem) {
         Ok(u) => u,
         Err((Causa::NotFound, msg)) => return Consulta::SemRelease(msg),
         Err((_, msg)) => return Consulta::Falhou(msg),
@@ -135,7 +136,7 @@ pub fn consultar<R: Rede>(rede: &R, repo: &str, assets: &Assets) -> Consulta {
     let tag = format!("v{versao}");
     let nomes = std::iter::once(&assets.cli).chain(assets.gui.as_ref());
     for nome in nomes {
-        match rede.asset_existe(&rede::url_de_asset(repo, &tag, nome)) {
+        match rede.asset_existe(&rede::url_de_asset(origem, &tag, nome)) {
             Ok(true) => {}
             Ok(false) => return Consulta::SemAsset { versao },
             Err(e) => return Consulta::Falhou(e),
@@ -220,7 +221,7 @@ fn baixar_verificar_e_por<R: Rede>(
 ) -> Result<(), String> {
     let baixa = |nome: &str| -> Result<PathBuf, String> {
         let alvo = dest.tmp.join(nome);
-        if !rede.baixar(&rede::url_de_asset(repo, tag, nome), &alvo) {
+        if !rede.baixar(&rede::url_de_asset(plataforma::repo_de_release(repo), tag, nome), &alvo) {
             return Err(format!("não consegui baixar {nome} de {repo} {tag}"));
         }
         binario::make_executable(ctx, &alvo);

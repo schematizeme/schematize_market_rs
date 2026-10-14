@@ -60,6 +60,27 @@ pub const SKILLS_REPO: &str = "schematizeme/schematize_skills_rs";
 /// ADR-0020). **O repo é PRIVADO até o dono publicá-lo** — antes disso o `install` diz isso em
 /// vez de repassar o erro cru do `git`.
 pub const OVERDEV_REPO: &str = "schematizeme/schematize_overdev_rs";
+/// O repo que publica os binários WINDOWS do market e do overdev (ADR-0026): lá moram os
+/// `.exe`, porque os repos Unix não têm código Windows.
+pub const WINDOWS_REPO: &str = "schematizeme/schematize_windows_rs";
+
+/// **O quê:** o repo de onde sai o RELEASE (assets) de `repo` em `os`: no Windows o market e o
+/// overdev vêm de [`WINDOWS_REPO`]; todo o resto (outros apps, outros SO) do próprio `repo`.
+/// Função PURA — uma tabela de dados `(app, os) -> repo de origem`.
+///
+/// **Onde:** [`repo_de_release`], a consulta de release, o download de asset e o self-update.
+pub fn repo_de_release_para(repo: &str, os: Os) -> &str {
+    match (repo, os) {
+        (MARKET_REPO | OVERDEV_REPO, Os::Windows) => WINDOWS_REPO,
+        _ => repo,
+    }
+}
+
+/// **O quê:** [`repo_de_release_para`] no SO desta máquina. **Onde:** consulta/baixa de release.
+pub fn repo_de_release(repo: &str) -> &str {
+    repo_de_release_para(repo, os())
+}
+
 /// O repo DESTE programa.
 ///
 /// **Por que ele precisa saber o próprio repo:** o market é o único componente que ninguém
@@ -396,6 +417,29 @@ mod tests {
             (None, None, None) => { /* plataforma sem binário publicado: cai no fonte */ }
             outro => panic!("alvo e nomes de asset saíram de sincronia: {outro:?}"),
         }
+    }
+
+    /// **O roteamento Windows:** só market e overdev saem do `schematize_windows_rs`, e só no
+    /// Windows; os assets continuam `<bin>-windows-x86_64.exe`. Os demais não mudam.
+    #[test]
+    fn roteia_assets_windows_para_o_repo_windows() {
+        for r in [MARKET_REPO, OVERDEV_REPO] {
+            assert_eq!(repo_de_release_para(r, Os::Windows), WINDOWS_REPO);
+            for so in [Os::Linux, Os::FreeBsd, Os::Mac] {
+                assert_eq!(repo_de_release_para(r, so), r);
+            }
+        }
+        for r in [APP_REPO, DEPLOYER_REPO, OPTIMIZER_REPO, DATABASE_REPO, GIT_REPO, SKILLS_REPO] {
+            for so in [Os::Linux, Os::Windows] {
+                assert_eq!(repo_de_release_para(r, so), r);
+            }
+        }
+        let (a, sfx) = alvo_de_asset_para(Os::Windows, "x86_64").unwrap();
+        assert_eq!(format!("schematize-market-{a}{sfx}"), "schematize-market-windows-x86_64.exe");
+        assert_eq!(
+            format!("schematize-overdev-gui-{a}{sfx}"),
+            "schematize-overdev-gui-windows-x86_64.exe"
+        );
     }
 
     /// Os CINCO alvos que a matriz publica têm nome — e um alvo que não existe reprova.

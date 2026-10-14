@@ -43,7 +43,7 @@ fn remover_negando(p: &Path) -> io::Result<Option<PathBuf>> {
 
 /// **O quê:** um [`Ambiente`] 100% de sandbox: só os diretórios passados existem para ele.
 /// **Onde:** todos os testes de comportamento.
-fn amb(path: &[&Path], usuario: &[&Path], sistema: &[&Path], state: &Path) -> Ambiente {
+fn amb(path: &[&Path], usuario: &[&Path], sistema: &[&Path], state: &Path) -> Ambiente<'static> {
     Ambiente {
         path_dirs: path.iter().map(|p| p.to_path_buf()).collect(),
         dirs_usuario: usuario.iter().map(|p| p.to_path_buf()).collect(),
@@ -51,7 +51,7 @@ fn amb(path: &[&Path], usuario: &[&Path], sistema: &[&Path], state: &Path) -> Am
         dirs_sistema: sistema.iter().map(|p| p.to_path_buf()).collect(),
         state_dir: state.to_path_buf(),
         protegidos: vec![],
-        remover: remover_real,
+        remover: Box::new(remover_real),
         dono_do_pacote: dono_falso,
     }
 }
@@ -230,7 +230,7 @@ fn permissao_negada_e_reportada_e_a_limpeza_segue() {
     binario(&negado.join("schematize-overdev"), "0.1.0");
     binario(&livre.join("schematize-overdev"), "0.1.1");
     let mut a = amb(&[&novo, &negado, &livre], &[], &[], &b.join("st"));
-    a.remover = remover_negando;
+    a.remover = Box::new(remover_negando);
 
     let rel = limpar_em(&a, &alvo_overdev(&novo));
 

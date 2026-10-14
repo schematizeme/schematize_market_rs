@@ -111,7 +111,11 @@ pub fn instalar_janela_com<R: super::release::Rede>(
     binario::garante_diretorio_pai(destino)?;
     let tmp = destino.with_file_name(format!("{}.baixado", nome_do_arquivo(destino)));
     let _ = std::fs::remove_file(&tmp);
-    let url = rede::url_de_asset(plataforma::MARKET_REPO, &format!("v{versao}"), asset);
+    let url = rede::url_de_asset(
+        plataforma::repo_de_release(plataforma::MARKET_REPO),
+        &format!("v{versao}"),
+        asset,
+    );
     if !rede.baixar(&url, &tmp) {
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("não consegui baixar {asset} (v{versao}) de {url}"));
@@ -205,7 +209,11 @@ fn baixar_candidato(ctx: &Ctx, asset: &str, alvo: &str) -> Result<PathBuf, Strin
     let eu = std::env::current_exe().map_err(|e| e.to_string())?;
     let dst = eu.with_file_name(format!("{}.baixado", nome_do_arquivo(&eu)));
     let _ = std::fs::remove_file(&dst);
-    let url = rede::url_de_asset(plataforma::MARKET_REPO, &format!("v{alvo}"), asset);
+    let url = rede::url_de_asset(
+        plataforma::repo_de_release(plataforma::MARKET_REPO),
+        &format!("v{alvo}"),
+        asset,
+    );
     if !rede::download(ctx, &url, &dst) {
         let _ = std::fs::remove_file(&dst);
         return Err(format!("download falhou: {url}"));

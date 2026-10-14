@@ -328,7 +328,7 @@ pub fn instalar_app_da_casa(
         &release::RedeReal(ctx),
         &divergencia::CommitsReais::github(ctx),
         &entrada,
-        &limpeza::Ambiente::real(),
+        &limpeza::Ambiente::real(ctx),
         &|de_binario| limpeza::alvo_do_app(app, de_binario),
         dry_run,
         confirmar,
