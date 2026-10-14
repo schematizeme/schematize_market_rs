@@ -32,6 +32,7 @@
 use super::alvo::Metodo;
 use super::metodo::mesmo_commit;
 use super::AppGerido;
+use crate::ctx::Ctx;
 use crate::nucleo::rede::Causa;
 use crate::nucleo::{bin, rede, util};
 use std::path::Path;
@@ -252,23 +253,24 @@ fn classificar_falha_do_git(stderr: &str) -> Causa {
 ///
 /// **Onde:** o `update`, o `install` e o `status`. `base` existe para o teste apontar para um
 /// repositório local (`file://…`); em produção é `https://github.com`.
-pub struct CommitsReais {
+pub struct CommitsReais<'a> {
     base: String,
+    ctx: Ctx<'a>,
 }
 
-impl CommitsReais {
+impl<'a> CommitsReais<'a> {
     /// **O quê:** o GitHub de verdade. **Onde:** [`checar`] e o `status`.
-    pub fn github() -> Self {
-        CommitsReais { base: "https://github.com".to_string() }
+    pub fn github(ctx: &Ctx<'a>) -> Self {
+        CommitsReais { base: "https://github.com".to_string(), ctx: *ctx }
     }
     /// **O quê:** aponta para outro "GitHub" (um diretório `file://…`). **Onde:** os testes.
     #[cfg(test)]
     pub fn com_base(base: &str) -> Self {
-        CommitsReais { base: base.to_string() }
+        CommitsReais { base: base.to_string(), ctx: Ctx::de_teste() }
     }
 }
 
-impl Commits for CommitsReais {
+impl Commits for CommitsReais<'_> {
     fn git_no_path(&self) -> bool {
         bin::binary_in_path("git")
     }
@@ -290,16 +292,17 @@ impl Commits for CommitsReais {
     }
     fn api_commit(&self, repo: &str, tag: &str) -> Result<String, (Causa, String)> {
         let url = format!("https://api.github.com/repos/{repo}/commits/{tag}");
-        let corpo = rede::get_text_com_cabecalho(&url, "Accept: application/vnd.github.sha")
-            .ok_or_else(|| {
-                (
-                    Causa::Network,
-                    format!(
+        let corpo =
+            rede::get_text_com_cabecalho(&self.ctx, &url, "Accept: application/vnd.github.sha")
+                .ok_or_else(|| {
+                    (
+                        Causa::Network,
+                        format!(
                         "não consegui consultar a API do GitHub para o commit de {tag} em {repo} \
                          (rede fora ou cota de 60/h esgotada; instalar o git evita a cota)"
                     ),
-                )
-            })?;
+                    )
+                })?;
         Ok(corpo.trim().to_string())
     }
 }
@@ -309,6 +312,7 @@ impl Commits for CommitsReais {
 ///
 /// **Onde:** [`super::componentes`], [`super::install_or_update`] e o plano (`--dry-run`).
 pub fn checar(
+    ctx: &Ctx,
     repo: &str,
     instalada: Option<&str>,
     alvo: Option<&str>,
@@ -320,17 +324,22 @@ pub fn checar(
     }
     let metodo = super::alvo::metodo_de(repo);
     Some(decidir(metodo, prov, || {
-        commit_do_release(&CommitsReais::github(), repo, &format!("v{a}"))
+        commit_do_release(&CommitsReais::github(ctx), repo, &format!("v{a}"))
     }))
 }
 
 /// **O quê:** a decisão de [`checar`] para um app da tabela (lê a proveniência do disco).
 /// **Onde:** [`super::componentes`] e o plano.
-pub fn checar_app(app: &AppGerido, instalada: Option<&str>, alvo: Option<&str>) -> Option<Decisao> {
+pub fn checar_app(
+    ctx: &Ctx,
+    app: &AppGerido,
+    instalada: Option<&str>,
+    alvo: Option<&str>,
+) -> Option<Decisao> {
     if instalada.is_none() || instalada != alvo {
         return None; // sem versão igual não há o que comparar (e não gasta processo nem rede).
     }
-    checar(app.repo, instalada, alvo, &proveniencia_do_app(app))
+    checar(ctx, app.repo, instalada, alvo, &proveniencia_do_app(app))
 }
 
 /// **O quê:** a linha que explica por que se reinstala. **Onde:** o `update` e o `install`.

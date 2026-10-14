@@ -1,6 +1,6 @@
 //! Os comandos do caminho de atualização: `update`, `pin`, `unpin`, `status`, `run`.
 //!
-//! **O quê:** traduz o que a pessoa digitou em chamadas de [`market::atualizar`], e imprime o
+//! **O quê:** traduz o que a pessoa digitou em chamadas de [`crate::atualizar`], e imprime o
 //! `status` — a única saída deste módulo que não vem de lá.
 //!
 //! **Onde:** o despacho de [`crate::cli::args::Cmd`] no `main`.
@@ -11,17 +11,18 @@
 //! update | status | pin | unpin | run` passa a ser `schematize-market <o mesmo>` — mesmos
 //! verbos, de propósito: quem tem o comando na mão só troca o nome do programa.
 
-use market::atualizar::{self, divergencia, exibir, versao};
-use market::i18n::{t, tf};
-use market::nucleo::plataforma;
+use crate::atualizar::{self, divergencia, exibir, versao};
+use crate::ctx::Ctx;
+use crate::i18n::{t, tf};
+use crate::nucleo::plataforma;
 
 /// **O quê:** `schematize-market update [--force] [--dry-run]`.
 /// **Onde:** o despacho do `main`.
-pub(crate) fn update_cmd(force: bool, dry_run: bool) -> Result<(), String> {
-    let r = atualizar::install_or_update(force, dry_run);
+pub(crate) fn update_cmd(ctx: &Ctx, force: bool, dry_run: bool) -> Result<(), String> {
+    let r = atualizar::install_or_update(ctx, force, dry_run);
     // A janela do market acompanha todo update (best-effort: só avisa se não der).
     if !dry_run {
-        atualizar::selfupdate::garantir_janela_do_market();
+        atualizar::selfupdate::garantir_janela_do_market(ctx);
     }
     r
 }
@@ -59,9 +60,9 @@ pub(crate) fn unpin_cmd() -> Result<(), String> {
 ///
 /// **Só aparece o que está instalado:** anunciar um app que a pessoa não pediu, num comando de
 /// diagnóstico, seria propaganda no lugar errado.
-pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
+pub(crate) fn status_cmd(ctx: &Ctx, json: bool) -> Result<(), String> {
     if json {
-        return status_json();
+        return status_json(ctx);
     }
     let os_s = match plataforma::os() {
         plataforma::Os::Linux => format!("Linux ({:?})", plataforma::linux_family()),
@@ -81,15 +82,19 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
             t("up.st_prebuilt_no")
         },
     );
-    let hub = (versao::installed_app_version(), exibir::versoes_de(plataforma::APP_REPO));
+    let hub = (versao::installed_app_version(), exibir::versoes_de(ctx, plataforma::APP_REPO));
     campo(t("up.st_app"), versionado(hub.0.clone()));
     for (r, v) in exibir::linhas_de_versoes(&hub.1) {
         campo(r, v);
     }
     let prov_hub = divergencia::proveniencia_do_binario(&plataforma::app_bin(false));
-    if let Some(l) =
-        linha_do_build(&estado_do_build(plataforma::APP_REPO, hub.0.as_deref(), &hub.1, &prov_hub))
-    {
+    if let Some(l) = linha_do_build(&estado_do_build(
+        ctx,
+        plataforma::APP_REPO,
+        hub.0.as_deref(),
+        &hub.1,
+        &prov_hub,
+    )) {
         campo("  build".into(), l);
     }
 
@@ -102,12 +107,13 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
         // `versao_instalada` e não o caminho direto: numa máquina que instalou antes da
         // renomeação do ADR-0012, o arquivo tem o nome ANTIGO — e dizer "nenhum" sobre um app
         // que está lá é a pior resposta possível num comando de diagnóstico.
-        let (instalada, v) = (app.versao_instalada(), exibir::versoes_de(app.repo));
+        let (instalada, v) = (app.versao_instalada(), exibir::versoes_de(ctx, app.repo));
         campo(app.bin.to_string(), versionado(instalada.clone()));
         for (r, linha) in exibir::linhas_de_versoes(&v) {
             campo(format!("  {r}"), linha);
         }
         if let Some(l) = linha_do_build(&estado_do_build(
+            ctx,
             app.repo,
             instalada.as_deref(),
             &v,
@@ -153,7 +159,7 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
 /// **Por que JSON escrito à mão e não `serde_json::to_string`:** o shape é o contrato, e
 /// escrevê-lo explicitamente faz uma mudança nele aparecer no diff. Uma struct com `Serialize`
 /// mudaria o JSON sempre que alguém renomeasse um campo — em silêncio.
-fn status_json() -> Result<(), String> {
+fn status_json(ctx: &Ctx) -> Result<(), String> {
     let esc = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
     let campo = |v: Option<String>| match v {
         Some(v) => format!("\"{}\"", esc(&v)),
@@ -162,8 +168,9 @@ fn status_json() -> Result<(), String> {
 
     let mut apps = Vec::new();
     for app in atualizar::estado_dos_apps() {
-        let (instalada, v) = (app.versao_instalada(), exibir::versoes_de(app.repo));
+        let (instalada, v) = (app.versao_instalada(), exibir::versoes_de(ctx, app.repo));
         let build = estado_do_build(
+            ctx,
             app.repo,
             instalada.as_deref(),
             &v,
@@ -174,16 +181,16 @@ fn status_json() -> Result<(), String> {
             esc(app.bin),
             esc(app.repo),
             campo(instalada),
-            campo(atualizar::alvo::ultima_publicada(app.repo)),
+            campo(atualizar::alvo::ultima_publicada(ctx, app.repo)),
             exibir::campos_json(&v),
             divergencia::campos_json(&build, "")
         ));
     }
-    let hub_v = exibir::versoes_de(plataforma::APP_REPO);
+    let hub_v = exibir::versoes_de(ctx, plataforma::APP_REPO);
     let hub_instalada = versao::installed_app_version();
     let prov_hub = divergencia::proveniencia_do_binario(&plataforma::app_bin(false));
     let hub_build =
-        estado_do_build(plataforma::APP_REPO, hub_instalada.as_deref(), &hub_v, &prov_hub);
+        estado_do_build(ctx, plataforma::APP_REPO, hub_instalada.as_deref(), &hub_v, &prov_hub);
 
     println!("{{");
     println!("  \"market\": \"{}\",", env!("CARGO_PKG_VERSION"));
@@ -194,7 +201,7 @@ fn status_json() -> Result<(), String> {
     // `app_latest` MANTÉM o significado de antes do D8 (consumido por fora — ver o doc): o alvo
     // do método de instalação (release p/ binário, main p/ fonte). Os campos novos e inequívocos
     // vêm ao lado.
-    println!("  \"app_latest\": {},", campo(versao::latest_app_version()));
+    println!("  \"app_latest\": {},", campo(versao::latest_app_version(ctx)));
     println!("  {},", exibir::campos_json(&hub_v));
     // D12: o commit do binário instalado x o da tag do release (campos novos; só acrescentam).
     println!("  {},", divergencia::campos_json(&hub_build, "app_"));
@@ -210,13 +217,20 @@ fn status_json() -> Result<(), String> {
 /// **O quê:** o [`divergencia::EstadoBuild`] de `repo` a partir do que o `status` já colheu.
 /// Toca a rede (um `ls-remote`). **Onde:** o `status`, humano e `--json`.
 fn estado_do_build(
+    ctx: &Ctx,
     repo: &str,
     instalada: Option<&str>,
     v: &exibir::Versoes,
     prov: &divergencia::Proveniencia,
 ) -> divergencia::EstadoBuild {
     let release = v.release.as_ref().ok().and_then(|r| r.as_deref());
-    divergencia::estado_build(&divergencia::CommitsReais::github(), repo, instalada, release, prov)
+    divergencia::estado_build(
+        &divergencia::CommitsReais::github(ctx),
+        repo,
+        instalada,
+        release,
+        prov,
+    )
 }
 
 /// **O quê:** a linha humana do `status` sobre o build, ou `None` se está tudo certo (o

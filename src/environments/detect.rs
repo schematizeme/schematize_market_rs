@@ -3,6 +3,7 @@
 //! `mise`/`docker`, e se um runtime já está instalado (binário no PATH / mise / imagem).
 //! Onde: consumido por `environments::mod` pra decidir métodos disponíveis e idempotência.
 
+use crate::ctx::Ctx;
 use crate::util;
 
 /// Família de distribuição — decide o gerenciador de pacotes do método `distro`.
@@ -130,25 +131,34 @@ pub fn escalador() -> Option<&'static str> {
 }
 
 /// Um binário está no PATH? (usa `command -v` num shell de login.)
-pub fn has_bin(bin: &str) -> bool {
-    util::run(util::login_shell(), &["-lc", &format!("command -v {bin}")])
-        .map(|s| !s.trim().is_empty())
-        .unwrap_or(false)
+pub fn has_bin(ctx: &Ctx, bin: &str) -> bool {
+    saida_do_shell(ctx, &format!("command -v {bin}")).map(|s| !s.trim().is_empty()).unwrap_or(false)
+}
+
+/// **O quê:** roda `cmd` no shell de login da costura (`plat.shell`) e devolve o stdout se
+/// saiu com sucesso (a saída é capturada). **Onde:** as sondas `has_bin` e `mise_has`.
+fn saida_do_shell(ctx: &Ctx, cmd: &str) -> Result<String, String> {
+    let out = ctx.plat.shell.run(cmd).map_err(|e| format!("falha ao executar shell: {e}"))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    } else {
+        Err(format!("shell falhou ({})", out.status))
+    }
 }
 
 /// `mise` está instalado nesta máquina?
-pub fn has_mise() -> bool {
-    has_bin("mise")
+pub fn has_mise(ctx: &Ctx) -> bool {
+    has_bin(ctx, "mise")
 }
 
 /// `docker` está instalado nesta máquina?
-pub fn has_docker() -> bool {
-    has_bin("docker")
+pub fn has_docker(ctx: &Ctx) -> bool {
+    has_bin(ctx, "docker")
 }
 
 /// O `mise` gerencia (tem instalado) a ferramenta `tool` (ex.: "go", "node")?
-pub fn mise_has(tool: &str) -> bool {
-    util::run(util::login_shell(), &["-lc", &format!("mise ls --installed {tool} 2>/dev/null")])
+pub fn mise_has(ctx: &Ctx, tool: &str) -> bool {
+    saida_do_shell(ctx, &format!("mise ls --installed {tool} 2>/dev/null"))
         .map(|s| s.lines().any(|l| !l.trim().is_empty()))
         .unwrap_or(false)
 }

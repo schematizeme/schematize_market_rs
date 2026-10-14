@@ -6,6 +6,10 @@
 //!
 //! **Onde:** app próprio (ADR-0012), extraído do hub.
 //!
+//! **ADR-0026:** o market é Unix-only e expõe uma biblioteca guiada por costuras:
+//! [`cli::run`] recebe `&Plataforma` (`schematize_plataforma`) e `&dyn Receitas`, de modo que o
+//! repo `schematize_windows_rs` monta o próprio `schematize-market.exe` com impls Windows.
+//!
 //! ## Por que o `env` veio junto, e não só os apps da casa
 //!
 //! O pedido foi "um app focado em instalação e deleção de programas" — e o CLI já tinha
@@ -18,8 +22,12 @@
 
 pub mod appsdacasa;
 pub mod atualizar;
+pub mod cli;
+pub mod ctx;
 pub mod environments;
 pub mod nucleo;
+pub mod receitas;
+pub mod receitas_unix;
 
 // Os módulos movidos chamam `crate::util::…` e `crate::agentrun::…`. Estes aliases mantêm o
 // código IDÊNTICO ao que era no hub — o corte é `/eng-refactor`, e reescrever 2.700 linhas de

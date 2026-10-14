@@ -10,6 +10,7 @@
 pub mod defs;
 pub mod detect;
 
+use crate::ctx::Ctx;
 use crate::i18n::{t, tf};
 use crate::util;
 use defs::{Env, Recipe, Step, Tool};
@@ -26,6 +27,7 @@ pub mod procedencia;
 pub use acoes::*;
 pub use estado::*;
 use maquina::*;
+pub use maquina::{razao_unix, Machine};
 pub use path::*;
 pub use plano::*;
 
@@ -176,7 +178,7 @@ mod tests {
             assert!(!t.display.is_empty() && !t.bin.is_empty() && !t.source_hint.is_empty());
         }
         // status() lista linguagens E ferramentas; as 4 ferramentas estão lá como "tool".
-        let all = status();
+        let all = status(&Ctx::de_teste());
         for s in slugs {
             let le = all.iter().find(|e| e.lang == s).expect("ferramenta no status");
             assert_eq!(le.category, "tool");
@@ -396,7 +398,7 @@ mod tests {
         ));
         // E a máquina FreeBSD não lista Docker/Mise como disponíveis.
         let m = Machine { family: Family::FreeBsd, mise: true, docker: true };
-        assert_eq!(m.available(), vec![Method::Distro, Method::Official]);
+        assert_eq!(m.available(&Ctx::de_teste()), vec![Method::Distro, Method::Official]);
     }
 
     /// FreeBSD + distro: ou há plano `pkg` (com sudo/doas conforme a máquina) ou há recusa com

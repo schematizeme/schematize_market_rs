@@ -9,6 +9,7 @@ use super::alvo::Metodo;
 use super::metodo::Origem;
 use super::metodo::{self, Veredito};
 use super::{alvo, ou_nenhum, Plano, Politica, APPS_GERIDOS};
+use crate::ctx::Ctx;
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::rede::Causa;
 
@@ -26,7 +27,7 @@ pub(super) fn dica_ecossistema_vazio(plano: &Plano) -> Option<String> {
 
 /// **O quê:** imprime o que aconteceria, sem mexer em nada. **Onde:** `install_or_update`
 /// com `--dry-run`.
-pub(super) fn imprimir_plano(plano: &Plano, instalada: Option<&str>, alvo: &str) {
+pub(super) fn imprimir_plano(ctx: &Ctx, plano: &Plano, instalada: Option<&str>, alvo: &str) {
     println!("{}\n", t("up.plan_title"));
     let acao_app = if plano.app {
         Veredito::Atualizar
@@ -40,7 +41,7 @@ pub(super) fn imprimir_plano(plano: &Plano, instalada: Option<&str>, alvo: &str)
     );
     for app in &plano.componentes {
         let inst = app.versao_instalada();
-        let al = alvo::alvo_de(app.repo);
+        let al = alvo::alvo_de(ctx, app.repo);
         let ult = match &al {
             alvo::Alvo::Versao(v) | alvo::Alvo::SemAsset { versao: v } => Some(v.clone()),
             alvo::Alvo::Indisponivel(_) => None,
@@ -50,7 +51,7 @@ pub(super) fn imprimir_plano(plano: &Plano, instalada: Option<&str>, alvo: &str)
         // D12: mesma versão + outro commit também é "atualizar" — o plano não pode mentir.
         let build = match al {
             alvo::Alvo::Versao(_) => {
-                super::divergencia::checar_app(app, inst.as_deref(), ult.as_deref())
+                super::divergencia::checar_app(ctx, app, inst.as_deref(), ult.as_deref())
             }
             _ => None,
         };
@@ -124,11 +125,11 @@ pub fn texto_da_causa(c: Causa) -> String {
 }
 
 /// **O quê:** colhe as [`Versoes`] de `repo` (toca a rede). **Onde:** o `status`.
-pub fn versoes_de(repo: &str) -> Versoes {
+pub fn versoes_de(ctx: &Ctx, repo: &str) -> Versoes {
     let (metodo, origem) = alvo::metodo_e_origem(repo);
     Versoes {
-        release: alvo::release_publicada(repo),
-        main: super::versao::latest_version_of(repo),
+        release: alvo::release_publicada(ctx, repo),
+        main: super::versao::latest_version_of(ctx, repo),
         metodo,
         origem,
     }

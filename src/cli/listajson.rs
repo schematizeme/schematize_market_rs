@@ -44,8 +44,8 @@
 //! explicitamente faz uma mudança nele aparecer no diff. Com `Serialize`, renomear um campo
 //! mudaria o JSON em silêncio — e quem quebraria seria a janela de quem já atualizou.
 
-use market::appsdacasa::{descobrir_app, Estado, EXTERNOS};
-use market::environments::{self, LangEnv};
+use crate::appsdacasa::{descobrir_app, Estado, EXTERNOS};
+use crate::environments::{self, LangEnv};
 
 /// Escapa o que vai dentro de aspas em JSON. Barra invertida ANTES da aspa, senão a barra que
 /// escapa a aspa seria ela mesma escapada duas vezes.
@@ -88,7 +88,7 @@ fn linha_env(le: &LangEnv) -> String {
 /// `state` é um enum de três valores e não um booleano de propósito: um binário que está lá e
 /// não responde é problema DIFERENTE de um que não existe, e achatar os dois foi o que fez a
 /// lista dizer "não instalado" sobre um deployer quebrado.
-fn linha_app(a: &market::appsdacasa::AppExterno) -> String {
+fn linha_app(a: &crate::appsdacasa::AppExterno) -> String {
     let (estado, versao) = match descobrir_app(a.bin) {
         Estado::Instalado { versao, .. } => ("installed", Some(versao)),
         Estado::Quebrado { .. } => ("broken", None),
@@ -104,8 +104,8 @@ fn linha_app(a: &market::appsdacasa::AppExterno) -> String {
 }
 
 /// **O quê:** imprime a lista inteira em JSON. **Onde:** `schematize-market list --json`.
-pub(crate) fn imprimir() {
-    let envs = environments::status();
+pub(crate) fn imprimir(ctx: &crate::ctx::Ctx) {
+    let envs = environments::status(ctx);
     let (langs, tools): (Vec<_>, Vec<_>) = envs.iter().partition(|le| le.category != "tool");
 
     println!("{{");
@@ -151,7 +151,7 @@ mod tests {
     /// janela de quem já atualizou, e o JSON à mão existe para que isso apareça no diff.
     #[test]
     fn as_chaves_do_contrato_estao_todas_la() {
-        let le = &environments::status()[0];
+        let le = &environments::status(&crate::ctx::Ctx::de_teste())[0];
         let j = linha_env(le);
         for k in [
             "slug",

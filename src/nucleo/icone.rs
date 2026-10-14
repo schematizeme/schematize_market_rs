@@ -125,54 +125,29 @@ fn sample(
     Some(color)
 }
 
-/// Escreve o ícone (tamanho `n`) como PNG em `path`. RESILIENTE: o pixel vem do `rgba` acima
-/// (código), então não depende de ImageMagick/rsvg (que falham em SVG). Cria os dirs-pai.
-pub fn write_png(path: &std::path::Path, n: u32) -> std::io::Result<()> {
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
+/// **O quê:** o PNG RGBA (codificado) do ícone em `n`×`n` px, gerado A PARTIR DO CÓDIGO.
+/// **Onde:** [`icones_hicolor`] — o market desenha o ícone e ENTREGA os bytes à costura
+/// `plat.atalhos`, que decide onde gravar (hicolor no Unix; `.ico`/Start Menu no Windows).
+pub fn png_bytes(n: u32) -> std::io::Result<Vec<u8>> {
     let (data, w, h) = rgba(n);
-    let file = std::fs::File::create(path)?;
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(file), w, h);
+    let mut out = Vec::new();
+    let mut enc = png::Encoder::new(&mut out, w, h);
     enc.set_color(png::ColorType::Rgba);
     enc.set_depth(png::BitDepth::Eight);
     let mut writer = enc.write_header().map_err(std::io::Error::other)?;
     writer.write_image_data(&data).map_err(std::io::Error::other)?;
-    Ok(())
+    drop(writer);
+    Ok(out)
 }
 
 /// Tamanhos hicolor padrão (freedesktop).
 pub const HICOLOR_SIZES: [u32; 8] = [16, 24, 32, 48, 64, 128, 256, 512];
 
-/// Gera a árvore hicolor completa em `base` (`<base>/<N>x<N>/apps/schematize.png`) a partir do CÓDIGO.
-/// É o gerador resiliente: install.sh chama isto em vez de rasterizar o SVG. Retorna os caminhos.
-pub fn write_hicolor(base: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
-    let mut out = Vec::new();
-    for n in HICOLOR_SIZES {
-        let p = base.join(format!("{n}x{n}")).join("apps").join("schematize-market.png");
-        write_png(&p, n)?;
-        out.push(p);
-    }
-    Ok(out)
-}
-
-/// Instala o ícone em TODOS os locais de fallback do usuário e devolve o caminho ABSOLUTO do 256px.
-/// "Força em todos os formatos": hicolor (16..512) + pixmaps + flat `~/.icons`. O caminho devolvido
-/// serve pra `Icon=` do `.desktop` como ABSOLUTO (à prova de cache/tema quebrado — no Wayland o dock
-/// depende do .desktop). Best-effort nos extras; hicolor é o principal.
-pub fn install_all(home: &std::path::Path) -> std::io::Result<std::path::PathBuf> {
-    let icons = home.join(".local/share/icons/hicolor");
-    write_hicolor(&icons)?;
-    let p256 = icons.join("256x256").join("apps").join("schematize-market.png");
-    // Fallbacks legados que alguns DEs/temas ainda consultam.
-    for extra in [
-        home.join(".local/share/pixmaps/schematize-market.png"),
-        home.join(".icons/schematize-market.png"),
-        home.join(".local/share/icons/schematize-market.png"),
-    ] {
-        let _ = write_png(&extra, 256);
-    }
-    Ok(p256)
+/// **O quê:** o ícone em TODOS os tamanhos hicolor, como `(px, bytes PNG)`.
+/// **Onde:** `EntradaAtalho::icones` em [`crate::nucleo::desktop::entrada`]; a costura grava
+/// cada um em `hicolor/<n>x<n>/apps/<icone_nome>.png`.
+pub fn icones_hicolor() -> std::io::Result<Vec<(u32, Vec<u8>)>> {
+    HICOLOR_SIZES.iter().map(|&n| png_bytes(n).map(|b| (n, b))).collect()
 }
 
 /// Ponto dentro de um quadrado (0..n) com cantos de raio `r` (squircle aproximado por raio).

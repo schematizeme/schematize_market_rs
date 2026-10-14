@@ -3,7 +3,7 @@
 //! **O quê:** [`ensure_toolchain`] garante `cargo` (instalando o rustup se faltar) e
 //! [`ensure_build_deps`] instala, por SO e por família de distro, o que a GUI (Slint) precisa
 //! para linkar — X11/Wayland/GL/xcb/fontconfig no Linux, Command Line Tools no macOS, MSVC
-//! Build Tools no Windows.
+//! Build Tools no Windows (este, só Unix: o Windows mora em `schematize_windows_rs`).
 //!
 //! **Onde:** [`crate::atualizar`], no caminho do fonte — o que roda quando não há binário
 //! pré-compilado para a plataforma, ou quando o baixado não executa aqui.
@@ -22,7 +22,9 @@
 //! comando exato e o que fazer depois — nunca "instale as dependências e tente de novo".
 
 use super::{plataforma, util};
+use crate::receitas_unix::baixar_para_pipe;
 use plataforma::{LinuxFam, Os};
+use schematize_plataforma::seams::rede::{cliente, Cliente};
 use std::path::PathBuf;
 
 /// **O quê:** garante o Rust/cargo e devolve o caminho ABSOLUTO do `cargo`.
@@ -47,13 +49,8 @@ pub fn ensure_toolchain() -> Result<PathBuf, String> {
         preparar_freebsd();
     }
     println!("→ instalando Rust (rustup, perfil mínimo)…");
-    match plataforma::os() {
-        Os::Windows => instalar_rustup_windows()?,
-        _ => {
-            // Unix: o instalador oficial, não interativo, perfil mínimo.
-            util::run_inherit("sh", &["-c", &comando_rustup(super::rede::cliente())])?;
-        }
-    }
+    // O instalador oficial, não interativo, perfil mínimo. (Windows: `schematize_windows_rs`.)
+    util::run_inherit("sh", &["-c", &comando_rustup(cliente())])?;
     if cargo_abs.is_file() {
         Ok(cargo_abs)
     } else if super::bin::binary_in_path("cargo") {
@@ -66,17 +63,13 @@ pub fn ensure_toolchain() -> Result<PathBuf, String> {
 
 /// **O quê:** o `… | sh` do rustup com o cliente HTTP disponível (`curl` ou, no FreeBSD sem
 /// curl, `fetch -o -`). PURA. **Onde:** [`ensure_toolchain`] e os testes.
-fn comando_rustup(cli: super::rede::Cliente) -> String {
-    format!(
-        "{} | sh -s -- -y --profile minimal",
-        super::rede::baixar_para_pipe(cli, "https://sh.rustup.rs")
-    )
+fn comando_rustup(cli: Cliente) -> String {
+    format!("{} | sh -s -- -y --profile minimal", baixar_para_pipe(cli, "https://sh.rustup.rs"))
 }
 
 /// **O quê:** no FreeBSD, instala `curl` e `git` (via `pkg`, com sudo/doas se preciso) quando
 /// faltam, sem a pessoa precisar saber. Best-effort: falha é dita e o fluxo segue.
 /// **Onde:** [`ensure_toolchain`], primeiro passo de todo build do fonte.
-#[cfg(not(windows))]
 fn preparar_freebsd() {
     let faltam: Vec<&str> =
         ["curl", "git"].into_iter().filter(|b| !super::bin::binary_in_path(b)).collect();
@@ -91,23 +84,6 @@ fn preparar_freebsd() {
     }
 }
 
-/// No-op fora de Unix (o FreeBSD não existe no Windows).
-#[cfg(windows)]
-fn preparar_freebsd() {}
-
-/// **O quê:** baixa e roda o `rustup-init.exe`. **Onde:** [`ensure_toolchain`] no Windows.
-fn instalar_rustup_windows() -> Result<(), String> {
-    let tmp = plataforma::state_dir().join("rustup-init.exe");
-    std::fs::create_dir_all(plataforma::state_dir())
-        .map_err(|e| format!("não consegui criar {}: {e}", plataforma::state_dir().display()))?;
-    if !super::rede::download("https://win.rustup.rs/x86_64", &tmp) {
-        return Err("não consegui baixar o rustup-init.exe. \
-                    Instale o Rust manualmente em https://rustup.rs"
-            .into());
-    }
-    util::run_inherit(tmp.to_str().unwrap_or_default(), &["-y", "--profile", "minimal"])
-}
-
 /// **O quê:** instala as libs de BUILD necessárias para compilar a GUI (Slint) do fonte.
 /// **Onde:** [`crate::atualizar`], antes do primeiro `cargo build`.
 pub fn ensure_build_deps() -> Result<(), String> {
@@ -115,7 +91,9 @@ pub fn ensure_build_deps() -> Result<(), String> {
         Os::Linux => ensure_build_deps_linux(),
         Os::FreeBsd => ensure_build_deps_freebsd(),
         Os::Mac => ensure_build_deps_mac(),
-        Os::Windows => ensure_build_deps_windows(),
+        Os::Windows => Err("o market Unix não instala deps de build no Windows; use as \
+             receitas do schematize_windows_rs."
+            .into()),
     }
 }
 
@@ -125,7 +103,6 @@ pub fn ensure_build_deps() -> Result<(), String> {
 /// Vazio quando já se é root (sudo em cima de root é ruído) ou quando não há escalador na
 /// máquina — nesse caso o comando roda como está e o gerenciador de pacotes é quem diz que
 /// falta permissão, com a mensagem dele, que é melhor que uma nossa adivinhando.
-#[cfg(not(windows))]
 fn sudo() -> &'static str {
     let is_root = util::capture("id", &["-u"]).map(|u| u == "0").unwrap_or(false);
     if is_root {
@@ -141,7 +118,6 @@ fn sudo() -> &'static str {
 
 /// **O quê:** roda um comando de gerenciador de pacotes, com elevação se preciso.
 /// **Onde:** [`ensure_build_deps_linux`].
-#[cfg(not(windows))]
 fn pkg_install(mgr_args: &[&str]) -> Result<(), String> {
     let s = sudo();
     let palavras: Vec<&str> = if s.is_empty() {
@@ -165,7 +141,6 @@ fn pkg_install(mgr_args: &[&str]) -> Result<(), String> {
 /// naquela distro. As FONTES vão separadas porque são best-effort: sem elas a GUI abre, só
 /// não desenha alguns alfabetos; falhar a instalação inteira por causa de fonte seria trocar
 /// uma degradação por uma parada.
-#[cfg(not(windows))]
 fn pacotes_de_build(fam: LinuxFam) -> Option<(Vec<&'static str>, Vec<&'static str>)> {
     match fam {
         LinuxFam::Debian => Some((
@@ -282,18 +257,7 @@ fn pacotes_de_build(fam: LinuxFam) -> Option<(Vec<&'static str>, Vec<&'static st
     }
 }
 
-/// **O quê:** no-op — não há distro Linux para preparar quando o alvo é Windows.
-/// **Onde:** [`ensure_build_deps`], pela variante da tabela de SO.
-///
-/// Existe para que o `match` de [`ensure_build_deps`] cubra os três SO em toda compilação:
-/// um braço que só existe numa plataforma faria o código nem compilar nas outras.
-#[cfg(windows)]
-fn ensure_build_deps_linux() -> Result<(), String> {
-    Ok(())
-}
-
 /// **O quê:** instala as deps do Slint na distro corrente. **Onde:** [`ensure_build_deps`].
-#[cfg(not(windows))]
 fn ensure_build_deps_linux() -> Result<(), String> {
     let fam = plataforma::linux_family();
     let Some((obrigatorios, fontes)) = pacotes_de_build(fam) else {
@@ -316,18 +280,10 @@ fn ensure_build_deps_linux() -> Result<(), String> {
     Ok(())
 }
 
-/// **O quê:** no-op — não há FreeBSD para preparar quando o alvo é Windows.
-/// **Onde:** [`ensure_build_deps`]. Mesmo motivo do irmão `_linux`.
-#[cfg(windows)]
-fn ensure_build_deps_freebsd() -> Result<(), String> {
-    Ok(())
-}
-
 /// **O quê:** os pacotes `pkg` do FreeBSD para compilar a GUI (Slint): `(obrigatórios, fontes)`.
 /// O primeiro token é o gerenciador (como em [`pacotes_de_build`]). PURA.
 /// **Onde:** [`ensure_build_deps_freebsd`] e o teste da tabela. O compilador (clang) já vem na
 /// base do FreeBSD; `curl` e `git` entram porque o base só traz `fetch` e todo download/clone daqui usa os dois.
-#[cfg(not(windows))]
 fn pacotes_de_build_freebsd() -> (Vec<&'static str>, Vec<&'static str>) {
     (
         vec![
@@ -353,7 +309,6 @@ fn pacotes_de_build_freebsd() -> (Vec<&'static str>, Vec<&'static str>) {
 
 /// **O quê:** instala as deps do Slint no FreeBSD via `pkg` (com sudo/doas se preciso).
 /// **Onde:** [`ensure_build_deps`] no FreeBSD.
-#[cfg(not(windows))]
 fn ensure_build_deps_freebsd() -> Result<(), String> {
     let (obrigatorios, fontes) = pacotes_de_build_freebsd();
     pkg_install(&obrigatorios)?;
@@ -362,19 +317,11 @@ fn ensure_build_deps_freebsd() -> Result<(), String> {
     Ok(())
 }
 
-/// **O quê:** no-op — não há macOS para preparar quando o alvo é Windows.
-/// **Onde:** [`ensure_build_deps`]. Mesmo motivo do irmão acima.
-#[cfg(windows)]
-fn ensure_build_deps_mac() -> Result<(), String> {
-    Ok(())
-}
-
 /// **O quê:** garante as Command Line Tools do Xcode. **Onde:** [`ensure_build_deps`] no macOS.
 ///
 /// Slint no Mac usa frameworks do sistema — não há brew envolvido. O `xcode-select --install`
 /// abre o instalador gráfico e retorna na hora, então o passo seguinte é da pessoa: por isso
 /// devolve `Err` com a instrução, em vez de fingir que já deu certo.
-#[cfg(not(windows))]
 fn ensure_build_deps_mac() -> Result<(), String> {
     let clt_ok = util::capture("xcode-select", &["-p"]).map(|p| !p.is_empty()).unwrap_or(false);
     if !clt_ok {
@@ -387,46 +334,7 @@ fn ensure_build_deps_mac() -> Result<(), String> {
     Ok(())
 }
 
-/// **O quê:** no-op — não há MSVC para preparar fora do Windows.
-/// **Onde:** [`ensure_build_deps`]. Mesmo motivo dos irmãos acima.
-#[cfg(not(windows))]
-fn ensure_build_deps_windows() -> Result<(), String> {
-    Ok(())
-}
-
-/// **O quê:** garante o toolchain MSVC (`link.exe`). **Onde:** [`ensure_build_deps`] no Windows.
-#[cfg(windows)]
-fn ensure_build_deps_windows() -> Result<(), String> {
-    if super::bin::binary_in_path("link") || super::bin::binary_in_path("cl") {
-        return Ok(());
-    }
-    if super::bin::binary_in_path("winget") {
-        println!("→ instalando o Visual Studio Build Tools (MSVC) via winget…");
-        let _ = util::run_inherit(
-            "winget",
-            &[
-                "install",
-                "--id",
-                "Microsoft.VisualStudio.2022.BuildTools",
-                "-e",
-                "--accept-source-agreements",
-                "--accept-package-agreements",
-                "--override",
-                "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools",
-            ],
-        );
-        return Err(
-            "instalei o MSVC Build Tools — REABRA o terminal (para o PATH pegar) e rode de novo."
-                .into(),
-        );
-    }
-    Err("no Windows a compilação do fonte precisa do MSVC Build Tools. Instale o \
-         'Visual Studio Build Tools' (workload C++) e rode de novo, ou aguarde um binário \
-         pré-compilado."
-        .into())
-}
-
-#[cfg(all(test, not(windows)))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -471,7 +379,7 @@ mod tests {
     /// O bootstrap do rustup usa curl quando há, e `fetch -o -` no FreeBSD sem curl.
     #[test]
     fn rustup_escolhe_curl_ou_fetch() {
-        use super::super::rede::{escolher_cliente, Cliente};
+        use schematize_plataforma::seams::rede::escolher_cliente;
         let com = comando_rustup(escolher_cliente(true, true));
         let sem = comando_rustup(escolher_cliente(true, false));
         assert!(com.starts_with("curl ") && com.contains("| sh -s -- -y"), "{com}");

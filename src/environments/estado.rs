@@ -41,18 +41,18 @@ impl LangEnv {
 /// Status de TODOS os environments nesta máquina (sonda a máquina UMA vez).
 /// Lista linguagens PRIMEIRO, ferramentas depois. Fonte única (o `list()` e a GUI
 /// consomem isto). Reaproveita exatamente a detecção que a tabela usa.
-pub fn status() -> Vec<LangEnv> {
-    let m = Machine::probe();
-    let available = m.available();
+pub fn status(ctx: &Ctx) -> Vec<LangEnv> {
+    let m = Machine::probe(ctx);
+    let available = m.available(ctx);
     let langs = defs::ENVS.iter().map(|env| LangEnv {
         lang: env.lang,
         display: env.display,
         category: "language",
         install_hint: available.iter().map(|x| x.slug()).collect::<Vec<_>>().join(", "),
         methods_available: available.clone(),
-        installed: installed_method(env, &m),
-        runtime_present: detect::has_bin(env.bin),
-        procedencia: Some(super::procedencia::de(env.lang, env.bin, m.mise, m.docker)),
+        installed: installed_method(ctx, env, &m),
+        runtime_present: detect::has_bin(ctx, env.bin),
+        procedencia: Some(super::procedencia::de(ctx, env.lang, env.bin, m.mise, m.docker)),
     });
     let tools = defs::TOOLS.iter().map(|tool| LangEnv {
         lang: tool.slug,
@@ -61,7 +61,7 @@ pub fn status() -> Vec<LangEnv> {
         install_hint: tool.source_hint.to_string(),
         methods_available: Vec::new(),
         installed: None,
-        runtime_present: detect::has_bin(tool.bin),
+        runtime_present: detect::has_bin(ctx, tool.bin),
         // Ferramenta tem UM caminho canônico; perguntar "por onde" não faz sentido.
         procedencia: None,
     });
@@ -89,8 +89,8 @@ pub fn status_text(le: &LangEnv) -> String {
 
 /// `schematize env list` — tabela: nome, caminho de instalação, e status.
 /// Linguagens e ferramentas na mesma tabela, com um cabeçalho por seção.
-pub fn list() {
-    let envs = status();
+pub fn list(ctx: &Ctx) {
+    let envs = status(ctx);
     println!("{}", t("env.header"));
     println!("  {:<14} {:<34} {}", t("env.col_lang"), t("env.col_methods"), t("env.col_status"));
     let mut printed_tools_header = false;

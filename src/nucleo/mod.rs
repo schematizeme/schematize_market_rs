@@ -10,6 +10,7 @@ pub mod desktop;
 pub mod dica_path;
 pub mod i18n;
 pub mod icone;
+pub mod lancador;
 pub mod util;
 
 // O caminho de ATUALIZAÇÃO, herdado do `schematize_updater_rs` (ADR-0013): o que o SO é

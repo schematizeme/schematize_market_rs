@@ -129,13 +129,13 @@ pub fn config_path() -> PathBuf {
     dados_dir().join("config.json")
 }
 
-/// Abre uma URL no navegador padrão (xdg-open), sem bloquear. Best-effort.
-pub fn open_url(url: &str) {
-    let _ = Command::new("xdg-open")
-        .arg(url)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
+/// **O quê:** abre uma URL no navegador padrão, sem bloquear (costura `plat.abridor`).
+/// Falha vai para o stderr — nunca engolida (piso 4) —, mas não aborta o chamador.
+/// **Onde:** quem precisa levar a pessoa a uma página (hoje nenhum fluxo do CLI).
+pub fn open_url(ctx: &crate::ctx::Ctx, url: &str) {
+    if let Err(e) = ctx.plat.abridor.abrir(url) {
+        eprintln!("aviso: não consegui abrir {url}: {e}");
+    }
 }
 
 /// Caminho absoluto do próprio binário (pra registrar nos hooks sem depender do PATH).
@@ -161,35 +161,6 @@ pub fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
             out.status,
             String::from_utf8_lossy(&out.stderr).trim()
         ))
-    }
-}
-
-/// **O quê:** o shell que roda os comandos dos planos: `bash` (o que os receitas e instaladores
-/// oficiais assumem) e, só no FreeBSD, `sh` quando o bash não está instalado — o FreeBSD base
-/// não o traz, e "bash não encontrado" seria erro de quem não tem como saber o que é bash.
-/// **Onde:** [`run_shell`] e a sonda `has_bin` do engine de environments.
-pub fn login_shell() -> &'static str {
-    if cfg!(target_os = "freebsd") && !super::bin::binary_in_path("bash") {
-        "sh"
-    } else {
-        "bash"
-    }
-}
-
-/// Executa um comando de shell HERDANDO o terminal (stdin/stdout/stderr).
-/// Ao contrário de `run` (que captura), este deixa o processo interagir com o usuário —
-/// essencial pra `sudo` pedir senha e pra instaladores oficiais mostrarem progresso.
-/// Fluxo: usado APENAS pelo engine de environments, DEPOIS do consentimento explícito.
-pub fn run_shell(cmd: &str) -> Result<(), String> {
-    let status = Command::new(login_shell())
-        .arg("-lc")
-        .arg(cmd)
-        .status()
-        .map_err(|e| format!("falha ao executar shell: {e}"))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("comando falhou ({status}): {cmd}"))
     }
 }
 
@@ -337,41 +308,6 @@ pub fn semver_lt(a: &str, b: &str) -> bool {
         }
     }
     false
-}
-
-/// Define as permissões POSIX de um caminho. NO-OP em Windows.
-///
-/// O quê: aplica o modo POSIX quando a plataforma tem o conceito. Onde: todo lugar que
-/// grava segredo ou dado sensível no HOME — sessão (`account`), chave SSH (`sshkeys`),
-/// relatório de debug (`debugreport`).
-///
-/// Por que existe: os três chamadores importavam `std::os::unix::fs::PermissionsExt` no
-/// TOPO do arquivo, sem `#[cfg(unix)]`. Isso quebra a compilação em Windows — é a causa
-/// exata de `cannot find 'unix' in 'os'` + `no associated function 'from_mode'` que
-/// derrubou o job de release do Windows em TODAS as 12 tentativas, deixando o asset
-/// `schematize-windows-x86_64.zip` sem existir e o link do site em 404.
-///
-/// Concentrar aqui troca três `cfg` espalhados (que voltariam a ser esquecidos no próximo
-/// arquivo que grave segredo) por um ponto único que já nasce correto nas duas plataformas.
-///
-/// **Entrada:** o caminho e o modo POSIX (`0o600` arquivo secreto, `0o700` diretório,
-/// `0o644` arquivo público como uma chave `.pub`).
-/// **Saída:** nenhuma. **Efeitos:** muda permissão no disco em Unix; erro é ignorado de
-/// propósito (best-effort — falhar o chmod não pode abortar a gravação que já ocorreu).
-///
-/// **Limite honesto:** em Windows isto NÃO restringe nada. A ACL herdada do diretório do
-/// usuário é a proteção efetiva ali; um equivalente real exigiria mexer em ACL, que é outro
-/// trabalho e outra dependência.
-pub fn definir_modo(path: &std::path::Path, modo: u32) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(modo));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, modo); // sem equivalente portátil; ver a nota no doc.
-    }
 }
 
 /// Lê um arquivo que será REESCRITO em seguida, distinguindo "não existe" de "não deu pra ler".

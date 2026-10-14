@@ -1,6 +1,6 @@
 name: release-market
 
-# Compila o `schematize-market` para Linux/macOS/Windows/FreeBSD e anexa os binários ao release.
+# Compila o `schematize-market` para Linux/macOS/FreeBSD (Windows: `schematize_windows_rs`, ADR-0026) e anexa os binários ao release.
 #
 # POR QUE ESTE WORKFLOW É BLOQUEANTE DO ADR-0013 (decisão D2), e não acabamento:
 #
@@ -63,10 +63,9 @@ jobs:
             target: x86_64-apple-darwin
             asset: schematize-market-macos-x86_64
             asset_gui: schematize-market-gui-macos-x86_64
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            asset: schematize-market-windows-x86_64.exe
-            asset_gui: schematize-market-gui-windows-x86_64.exe
+          # Windows: SEM entrada aqui. Os `schematize-market*.exe` agora saem do repo
+          # `schematize_windows_rs` (ADR-0026), que depende desta lib e provê o `Plataforma`
+          # e as `Receitas` do Windows. Este repo é Unix-only.
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -86,7 +85,6 @@ jobs:
         run: |
           set -euo pipefail
           bin="target/${{ matrix.target }}/release/schematize-market"
-          [ "${{ runner.os }}" = "Windows" ] && bin="$bin.exe"
           "$bin" --version
       # A JANELA do gestor, publicada AO LADO do binário (ADR-0014 D5).
       #
@@ -130,20 +128,11 @@ jobs:
           git clone --depth 1 https://github.com/schematizeme/schematize-updater-gui.git ../janela
           cargo build --release --locked --manifest-path ../janela/Cargo.toml \
             --target ${{ matrix.target }}
-          sfx=""; [ "${{ runner.os }}" = "Windows" ] && sfx=".exe"
-          cp "../janela/target/${{ matrix.target }}/release/schematize-market-gui$sfx" \
+          cp "../janela/target/${{ matrix.target }}/release/schematize-market-gui" \
              "${{ matrix.asset_gui }}"
 
-      - name: Nomear o asset (unix)
-        if: runner.os != 'Windows'
+      - name: Nomear o asset
         run: cp target/${{ matrix.target }}/release/schematize-market ${{ matrix.asset }}
-      - name: Nomear o asset (windows)
-        # `shell: cmd` explicito: `copy` com barra invertida e sintaxe do cmd. Sem esta linha o
-        # passo herda o `pwsh` (default do runner Windows) e funciona por acidente, via alias —
-        # e o analisador le a linha como bash e reporta falso positivo.
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: copy target\${{ matrix.target }}\release\schematize-market.exe ${{ matrix.asset }}
       - name: Anexar ao release
         uses: softprops/action-gh-release@v2
         with:

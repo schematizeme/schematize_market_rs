@@ -27,6 +27,7 @@
 
 use super::alvo::Publicado;
 use super::{binario, AppGerido};
+use crate::ctx::Ctx;
 use crate::nucleo::plataforma::{self, Os};
 use crate::nucleo::rede::{self, Causa};
 use std::path::{Path, PathBuf};
@@ -44,18 +45,19 @@ pub trait Rede {
     fn baixar(&self, url: &str, dest: &Path) -> bool;
 }
 
-/// **O quê:** a [`Rede`] de verdade (curl / PowerShell). **Onde:** o `install` e o `update`.
-pub struct RedeReal;
+/// **O quê:** a [`Rede`] de verdade (costura `plat.rede` + sondas das `Receitas`).
+/// **Onde:** o `install` e o `update`.
+pub struct RedeReal<'a>(pub &'a Ctx<'a>);
 
-impl Rede for RedeReal {
+impl Rede for RedeReal<'_> {
     fn ultimo_release(&self, repo: &str) -> Result<String, (Causa, String)> {
-        rede::url_do_ultimo_release_tipado(repo)
+        rede::url_do_ultimo_release_tipado(self.0, repo)
     }
     fn asset_existe(&self, url: &str) -> Result<bool, String> {
-        rede::asset_existe(url)
+        rede::asset_existe(self.0, url)
     }
     fn baixar(&self, url: &str, dest: &Path) -> bool {
-        rede::download(url, dest)
+        rede::download(self.0, url, dest)
     }
 }
 
@@ -182,6 +184,7 @@ pub fn destino_do_app(app: &AppGerido) -> Destino {
 /// NUNCA é executada (abriria uma tela) — vale o tamanho e o `chmod`. Qualquer falha é `Err`
 /// com a causa; nada é instalado antes de o CLI passar na verificação.
 pub fn baixar_e_instalar<R: Rede>(
+    ctx: &Ctx,
     rede: &R,
     repo: &str,
     versao: &str,
@@ -195,7 +198,7 @@ pub fn baixar_e_instalar<R: Rede>(
     }
     std::fs::create_dir_all(tmp)
         .map_err(|e| format!("não consegui criar {}: {e}", tmp.display()))?;
-    let resultado = baixar_verificar_e_por(rede, repo, &tag, versao, assets, dest);
+    let resultado = baixar_verificar_e_por(ctx, rede, repo, &tag, versao, assets, dest);
     if let Err(e) = std::fs::remove_dir_all(tmp) {
         eprintln!("aviso: não consegui apagar {}: {e}", tmp.display());
     }
@@ -207,6 +210,7 @@ pub fn baixar_e_instalar<R: Rede>(
 /// **O quê:** o miolo de [`baixar_e_instalar`]: baixa, verifica o CLI e põe o par no destino.
 /// **Onde:** só [`baixar_e_instalar`], que cuida do diretório temporário em volta.
 fn baixar_verificar_e_por<R: Rede>(
+    ctx: &Ctx,
     rede: &R,
     repo: &str,
     tag: &str,
@@ -219,7 +223,7 @@ fn baixar_verificar_e_por<R: Rede>(
         if !rede.baixar(&rede::url_de_asset(repo, tag, nome), &alvo) {
             return Err(format!("não consegui baixar {nome} de {repo} {tag}"));
         }
-        binario::make_executable(&alvo);
+        binario::make_executable(ctx, &alvo);
         Ok(alvo)
     };
     let cli_tmp = baixa(&assets.cli)?;
@@ -234,9 +238,9 @@ fn baixar_verificar_e_por<R: Rede>(
         Some(g) => Some(baixa(g)?),
         None => None,
     };
-    binario::place(&cli_tmp, &dest.cli)?;
+    binario::place(ctx, &cli_tmp, &dest.cli)?;
     match (gui_tmp, &dest.gui) {
-        (Some(src), Some(dst)) => binario::place(&src, dst)
+        (Some(src), Some(dst)) => binario::place(ctx, &src, dst)
             .map_err(|e| format!("o binário está instalado, mas a janela não: {e}"))?,
         (Some(_), None) => return Err("o app tem janela mas não há destino para ela".to_string()),
         (None, _) => {}
@@ -263,6 +267,7 @@ pub enum Via {
 /// - `Falhou` (rede, cota) -> `Err`, `fonte` NUNCA chamada: compilar por causa de uma rede
 ///   ruim instalaria rustup e pediria sudo por um problema que não é do binário.
 pub fn instalar_ou_fonte<R: Rede>(
+    ctx: &Ctx,
     rede: &R,
     repo: &str,
     assets: Option<&Assets>,
@@ -275,7 +280,7 @@ pub fn instalar_ou_fonte<R: Rede>(
     };
     match consultar(rede, repo, assets) {
         Consulta::Achou { versao } => {
-            baixar_e_instalar(rede, repo, &versao, assets, dest)?;
+            baixar_e_instalar(ctx, rede, repo, &versao, assets, dest)?;
             Ok(Via::Release(versao))
         }
         Consulta::SemAsset { versao } => {
@@ -453,7 +458,7 @@ mod tests {
         );
         let d = sandbox("achou");
         let compilou = Cell::new(false);
-        let via = instalar_ou_fonte(&f, REPO, Some(&assets()), &d, || {
+        let via = instalar_ou_fonte(&Ctx::de_teste(), &f, REPO, Some(&assets()), &d, || {
             compilou.set(true);
             Ok(())
         })
@@ -475,7 +480,7 @@ mod tests {
         let f = Falsa::com_erro(Causa::NotFound, "404");
         let d = sandbox("nf");
         let compilou = Cell::new(false);
-        let via = instalar_ou_fonte(&f, REPO, Some(&assets()), &d, || {
+        let via = instalar_ou_fonte(&Ctx::de_teste(), &f, REPO, Some(&assets()), &d, || {
             compilou.set(true);
             Ok(())
         })
@@ -491,7 +496,7 @@ mod tests {
         let f = Falsa::com_release("0.1.0", &["schematize-overdev-linux-x86_64"]);
         let d = sandbox("semgui");
         let compilou = Cell::new(false);
-        let via = instalar_ou_fonte(&f, REPO, Some(&assets()), &d, || {
+        let via = instalar_ou_fonte(&Ctx::de_teste(), &f, REPO, Some(&assets()), &d, || {
             compilou.set(true);
             Ok(())
         })
@@ -505,7 +510,7 @@ mod tests {
     fn plataforma_sem_asset_vai_direto_ao_fonte() {
         let f = Falsa::com_release("0.1.0", &[]);
         let d = sandbox("semplat");
-        let via = instalar_ou_fonte(&f, REPO, None, &d, || Ok(())).unwrap();
+        let via = instalar_ou_fonte(&Ctx::de_teste(), &f, REPO, None, &d, || Ok(())).unwrap();
         assert_eq!(via, Via::Fonte);
         assert_eq!(f.sondas.get(), 0, "nem sonda a rede");
     }
@@ -518,7 +523,7 @@ mod tests {
             let f = Falsa::com_erro(causa, "sem-rede-x");
             let d = sandbox("net");
             let compilou = Cell::new(false);
-            let r = instalar_ou_fonte(&f, REPO, Some(&assets()), &d, || {
+            let r = instalar_ou_fonte(&Ctx::de_teste(), &f, REPO, Some(&assets()), &d, || {
                 compilou.set(true);
                 Ok(())
             });
@@ -540,7 +545,7 @@ mod tests {
         f.versao_do_cli = "9.9.9".into();
         let d = sandbox("ruim");
         let compilou = Cell::new(false);
-        let e = instalar_ou_fonte(&f, REPO, Some(&assets()), &d, || {
+        let e = instalar_ou_fonte(&Ctx::de_teste(), &f, REPO, Some(&assets()), &d, || {
             compilou.set(true);
             Ok(())
         })
@@ -562,7 +567,7 @@ mod tests {
         let mut a = assets();
         a.cli = "fantasma-x".into();
         f.existem.push(a.cli.clone());
-        let r = baixar_e_instalar(&FalsaSemDownload(f), REPO, "0.1.0", &a, &d);
+        let r = baixar_e_instalar(&Ctx::de_teste(), &FalsaSemDownload(f), REPO, "0.1.0", &a, &d);
         assert!(r.unwrap_err().contains("baixar"));
     }
 
@@ -586,7 +591,9 @@ mod tests {
                 gui: Some(base.join("bin").join(format!("{bin}-gui"))),
                 tmp: base.join("dl"),
             };
-            let via = instalar_ou_fonte(&f, REPO, Some(&a), &d, || panic!("sem fonte")).unwrap();
+            let via =
+                instalar_ou_fonte(&Ctx::de_teste(), &f, REPO, Some(&a), &d, || panic!("sem fonte"))
+                    .unwrap();
             assert_eq!(via, Via::Release("0.1.0".into()));
             assert!(d.gui.as_ref().unwrap().is_file(), "{bin}: a janela não foi instalada");
             let _ = std::fs::remove_dir_all(&base);

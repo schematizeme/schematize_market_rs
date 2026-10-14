@@ -24,6 +24,7 @@ use super::divergencia::{self, Commits, Decisao};
 use super::limpeza::{self, Alvo, Ambiente};
 use super::release::{self, Assets, Consulta, Destino, Rede, Via};
 use super::versao;
+use crate::ctx::Ctx;
 use crate::nucleo::util;
 use std::path::PathBuf;
 
@@ -157,6 +158,7 @@ pub fn avaliar<R: Rede, C: Commits>(rede: &R, commits: &C, e: &Entrada) -> Avali
 /// repo não tem release com binário (ver [`release::instalar_ou_fonte`]).
 #[allow(clippy::too_many_arguments)]
 pub fn instalar_com<R: Rede, C: Commits>(
+    ctx: &Ctx,
     rede: &R,
     commits: &C,
     e: &Entrada,
@@ -191,7 +193,7 @@ pub fn instalar_com<R: Rede, C: Commits>(
     if !confirmar(&motivo) {
         return Ok(Resultado::Cancelado);
     }
-    let via = release::instalar_ou_fonte(rede, e.repo, e.assets, e.dest, fonte)?;
+    let via = release::instalar_ou_fonte(ctx, rede, e.repo, e.assets, e.dest, fonte)?;
     // D11: instalação concluída = cópias antigas saem (o `?` acima impede isto numa falha).
     limpar(matches!(via, Via::Release(_)));
     Ok(Resultado::Instalado(via))
@@ -331,6 +333,7 @@ mod tests {
         };
         let canon = m.canon.clone();
         instalar_com(
+            &Ctx::de_teste(),
             rede,
             commits,
             &e,
@@ -414,6 +417,7 @@ mod tests {
         let canon = m.canon.clone();
         let rodar = |f: &Falsa| {
             instalar_com(
+                &Ctx::de_teste(),
                 f,
                 &commits_ok(),
                 &e,
@@ -532,6 +536,7 @@ mod tests {
         };
         let canon = m.canon.clone();
         let r = instalar_com(
+            &Ctx::de_teste(),
             &f,
             &commits_ok(),
             &e,

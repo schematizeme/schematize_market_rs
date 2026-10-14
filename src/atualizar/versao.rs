@@ -12,6 +12,7 @@
 //! idêntico, incluindo o formato e o CAMINHO do arquivo de pin. O acréscimo é o pin por
 //! COMPONENTE: o updater tinha um pin só, do app, e o market gere seis binários.
 
+use crate::ctx::Ctx;
 use crate::nucleo::{plataforma, rede, util};
 use std::path::{Path, PathBuf};
 
@@ -50,8 +51,8 @@ pub fn parse_cargo_version(toml: &str) -> Option<String> {
 /// Reusar a versão do schematize para decidir sobre o Deployer seria comparar duas coisas
 /// diferentes — e é exatamente o defeito que esta função existe para não deixar acontecer de
 /// novo.
-pub fn latest_version_of(repo: &str) -> Option<String> {
-    parse_cargo_version(&rede::get_text(&rede::url_do_cargo_toml(repo))?)
+pub fn latest_version_of(ctx: &Ctx, repo: &str) -> Option<String> {
+    parse_cargo_version(&rede::get_text(ctx, &rede::url_do_cargo_toml(repo))?)
 }
 
 /// **O quê:** versão de um binário instalado, a partir da linha do `--version`.
@@ -117,8 +118,8 @@ pub fn consultar_versao(bin: &Path) -> Result<String, String> {
 /// **O quê:** a última versão publicada do app (CLI) PARA ESTA INSTALAÇÃO — o release com
 /// asset para quem instala por binário, o `main` para quem compila ([`super::alvo`], D7).
 /// **Onde:** o `status`.
-pub fn latest_app_version() -> Option<String> {
-    super::alvo::ultima_publicada(plataforma::APP_REPO)
+pub fn latest_app_version(ctx: &Ctx) -> Option<String> {
+    super::alvo::ultima_publicada(ctx, plataforma::APP_REPO)
 }
 
 /// **O quê:** a versão do app instalado nesta máquina. **Onde:** o `status` e o plano.
@@ -182,8 +183,8 @@ pub fn write_pin(v: Option<&str>) -> Result<(), String> {
 
 /// **O quê:** a versão-ALVO do app: o pin se houver, senão a última publicada.
 /// **Onde:** [`super::planejar`].
-pub fn target_version() -> Option<String> {
-    read_pin().or_else(latest_app_version)
+pub fn target_version(ctx: &Ctx) -> Option<String> {
+    read_pin().or_else(|| latest_app_version(ctx))
 }
 
 /// **O quê:** interpreta o que a pessoa digitou em `pin <x>`. Função PURA — decide, não grava.

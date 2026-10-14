@@ -1,7 +1,9 @@
-//! Dica de PATH — diz, sem culpar ninguém, como pôr a pasta de instalação no PATH.
+//! Dica de PATH — diz, sem culpa, como pôr a pasta de instalação no PATH.
 //!
-//! **O quê:** funções PURAS que decidem se a pasta onde o market instala (`~/.cargo/bin`) está
-//! no PATH e, se não está, qual é a ÚNICA linha que resolve no shell da pessoa.
+//! **O quê:** renderiza, no idioma da pessoa (20 línguas, catálogo i18n do market), a
+//! [`Orientacao`] estruturada que a costura `plat.path` devolve: qual é a ÚNICA linha que
+//! resolve no shell dela. A DECISÃO ("está no PATH?", "qual shell?", "qual linha?") é da
+//! costura (`schematize_plataforma::seams::PathSetup`); aqui só mora o TEXTO.
 //!
 //! **Onde:** [`aviso_pos_instalacao`], chamado ao fim de `install`/`update`
 //! (`atualizar::componentes::finish` e `cli::instalar::instalar_app`).
@@ -10,74 +12,48 @@
 //! fish) a pasta nunca entrou no PATH e o aviso "reabra o terminal" não resolvia nada. Isto
 //! não edita rc de shell: o fish não tem rc que o market conheça, então dizemos o comando.
 
+use crate::ctx::Ctx;
 use crate::nucleo::i18n::tf;
+use schematize_plataforma::seams::pathsetup::{Orientacao, TipoShell};
 use std::path::Path;
 
-/// **O quê:** normaliza uma entrada de PATH para comparar: expande `~` e `$HOME`, tira barras
-/// finais. **Onde:** [`esta_no_path`].
-fn normalizar(entrada: &str, home: &str) -> String {
-    let mut e = entrada.trim().to_string();
-    for pre in ["~", "$HOME", "${HOME}"] {
-        if e == pre || e.starts_with(&format!("{pre}/")) {
-            e = format!("{home}{}", &e[pre.len()..]);
-            break;
-        }
-    }
-    while e.len() > 1 && e.ends_with('/') {
-        e.pop();
-    }
-    e
-}
-
-/// **O quê:** `true` se `dir` aparece em `path` (lista separada por `:`), ignorando barra final
-/// e a grafia `~`/`$HOME`/absoluto. **Onde:** [`orientar_path`].
-pub fn esta_no_path(path: &str, dir: &Path, home: &Path) -> bool {
-    let home = home.to_string_lossy();
-    let alvo = normalizar(&dir.to_string_lossy(), &home);
-    path.split(':').filter(|p| !p.trim().is_empty()).any(|p| normalizar(p, &home) == alvo)
-}
-
-/// **O quê:** a orientação para quando `dir` não está no PATH: a linha exata para o shell em
-/// `shell` (o valor de `$SHELL`). `None` se já está no PATH. Nunca edita nada.
+/// **O quê:** o texto da orientação para `dir`, no idioma ativo: a linha exata para o shell
+/// detectado e, quando há `rc`, onde ela fica salva (`~/.bashrc`, `~/.zshrc`, `~/.profile`).
+/// O fish não tem `rc` que o market conheça: só o comando. PURA (lê só o catálogo i18n).
 ///
 /// **Onde:** [`aviso_pos_instalacao`] e a suíte.
-pub fn orientar_path(path: &str, dir: &Path, home: &Path, shell: &str) -> Option<String> {
-    if esta_no_path(path, dir, home) {
-        return None;
-    }
-    let nome = shell.rsplit('/').next().unwrap_or("");
-    let (arquivo, comando) = match nome {
-        "fish" => (None, "fish_add_path ~/.cargo/bin".to_string()),
-        "bash" => (Some("~/.bashrc"), linha_export("~/.bashrc")),
-        "zsh" => (Some("~/.zshrc"), linha_export("~/.zshrc")),
-        _ => (Some("~/.profile"), linha_export("~/.profile")),
+pub fn renderizar(o: &Orientacao, dir: &Path) -> String {
+    let arquivo = match o.shell {
+        TipoShell::Fish => None,
+        TipoShell::Bash => Some("~/.bashrc"),
+        TipoShell::Zsh => Some("~/.zshrc"),
+        TipoShell::Outro => Some("~/.profile"),
     };
     let salvo =
         arquivo.map(|a| format!(" {}", tf("path.saved_in", &[("file", a)]))).unwrap_or_default();
-    Some(tf(
+    tf(
         "path.hint",
-        &[("dir", &dir.display().to_string()), ("saved", &salvo), ("command", &comando)],
-    ))
+        &[("dir", &dir.display().to_string()), ("saved", &salvo), ("command", &o.linha)],
+    )
 }
 
-/// **O quê:** o comando que acrescenta `~/.cargo/bin` ao PATH no arquivo `rc` dado.
-/// **Onde:** [`orientar_path`], para bash, zsh e o fallback `~/.profile`.
-fn linha_export(rc: &str) -> String {
-    format!("echo 'export PATH=\"$HOME/.cargo/bin:$PATH\"' >> {rc}")
-}
-
-/// **O quê:** lê PATH e SHELL do ambiente e devolve a orientação, se for o caso.
+/// **O quê:** pergunta à costura se `dir` já está no PATH e, se não está, devolve a orientação
+/// renderizada. `None` se já está. Nunca edita nada.
 /// **Onde:** fim de `install`/`update`, que imprimem o resultado.
-pub fn aviso_pos_instalacao(dir: &Path, home: &Path) -> Option<String> {
-    let path = std::env::var("PATH").unwrap_or_default();
-    let shell = std::env::var("SHELL").unwrap_or_default();
-    orientar_path(&path, dir, home, &shell)
+pub fn aviso_pos_instalacao(ctx: &Ctx, dir: &Path) -> Option<String> {
+    ctx.plat.path.orientacao(dir).map(|o| renderizar(&o, dir))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use schematize_plataforma::seams::pathsetup::orientacao_em;
     use std::path::PathBuf;
+
+    /// A orientação renderizada (a costura decide; este módulo escreve o texto).
+    fn orientar_path(path: &str, dir: &Path, home: &Path, shell: &str) -> Option<String> {
+        orientacao_em(path, dir, home, shell).map(|o| renderizar(&o, dir))
+    }
 
     fn home() -> PathBuf {
         PathBuf::from("/home/ana")

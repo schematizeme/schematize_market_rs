@@ -1,142 +1,45 @@
-//! Rede sem dependência de crate — shell-out para o cliente HTTP nativo de cada SO.
+//! Rede do market — os helpers de GitHub em cima da costura `Rede` da plataforma.
 //!
 //! **O quê:** [`get_text`] lê uma URL como texto (o `Cargo.toml` cru de um repo, para saber a
-//! última versão) e [`download`] grava um asset em disco.
+//! última versão), [`download`] grava um asset em disco, e as sondas do GitHub
+//! ([`url_do_ultimo_release_tipado`], [`asset_existe`]) com a classificação PURA do que
+//! voltou ([`classificar_redirect`], [`classificar_http_do_asset`]).
 //!
 //! **Onde:** [`crate::atualizar`] — resolver versão-alvo e baixar binário pré-compilado.
 //!
-//! ## Procedência e a razão de não haver crate HTTP aqui
+//! ## O que mudou no ADR-0026 (F4a)
 //!
-//! Porte do `fetch.rs` do `schematize_updater_rs` (ADR-0013), sob o D4. A escolha original se
-//! mantém pelo mesmo motivo: este é o caminho que INSTALA o resto. Uma árvore de dependências
-//! de TLS aqui significa que o gestor de pacotes só compila onde essa árvore compila — e o
-//! único componente que precisa funcionar em toda máquina passa a ser o mais frágil de todos.
-//! `curl` já está em toda instalação Unix (exceto o FreeBSD base, que traz `fetch(1)` — usado
-//! no lugar quando não há curl, ver [`cliente`]), e no Windows desde a build 17063.
+//! O shell-out a `curl`/`fetch`/PowerShell saiu daqui: o texto e o download passam por
+//! `plat.rede` (`schematize_plataforma::seams::Rede`), e as sondas que precisam de cabeçalho,
+//! `-w %{http_code}` ou do redirect (que a costura genérica não expõe) passam por
+//! [`crate::receitas::Receitas`] — o Unix as implementa com `curl`/`fetch`
+//! ([`crate::receitas_unix`]), o repo Windows com PowerShell. Aqui ficou o que é
+//! independente de SO: montar URL e CLASSIFICAR a resposta do GitHub.
+//!
+//! ## Procedência
+//!
+//! Porte do `fetch.rs` do `schematize_updater_rs` (ADR-0013), sob o D4. Não há crate HTTP
+//! de propósito: este é o caminho que INSTALA o resto, e uma árvore de TLS aqui faria o
+//! gestor só compilar onde essa árvore compila.
 
-use super::util;
+use crate::ctx::Ctx;
 use std::path::Path;
-
-/// User-Agent das requisições. O GitHub responde 403 a requisição sem UA identificável, e
-/// "sem internet" seria o diagnóstico errado para esse 403.
-const UA: &str = "User-Agent: schematize-market";
-
-/// Cliente HTTP de linha de comando. `Fetch` é o `fetch(1)` do FreeBSD base — só entra quando o
-/// SO é FreeBSD e NÃO há `curl` (o base não traz curl; quem usa não precisa saber disso).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Cliente {
-    Curl,
-    Fetch,
-}
-
-/// **O quê:** escolhe o cliente a partir de fatos já medidos. PURA. `Fetch` só no FreeBSD sem
-/// curl; em qualquer outro caso, `Curl` (inclusive no FreeBSD COM curl).
-/// **Onde:** [`cliente`] e os testes.
-pub fn escolher_cliente(freebsd: bool, tem_curl: bool) -> Cliente {
-    if freebsd && !tem_curl {
-        Cliente::Fetch
-    } else {
-        Cliente::Curl
-    }
-}
-
-/// **O quê:** o cliente a usar NESTA máquina (mede o SO compilado e o PATH).
-/// **Onde:** todo download/leitura deste módulo e os bootstraps (`rustup`).
-pub fn cliente() -> Cliente {
-    escolher_cliente(cfg!(target_os = "freebsd"), super::bin::binary_in_path("curl"))
-}
-
-/// **O quê:** o trecho de shell que escreve o corpo de `url` na saída padrão, pra ir num
-/// `| sh`: `curl … <url>` ou `fetch -o - <url>`. PURA.
-/// **Onde:** os bootstraps `curl … | sh` (rustup) que rodam também no FreeBSD.
-pub fn baixar_para_pipe(cli: Cliente, url: &str) -> String {
-    match cli {
-        Cliente::Curl => format!("curl --proto '=https' --tlsv1.2 -sSf {url}"),
-        Cliente::Fetch => format!("fetch -o - {url}"),
-    }
-}
-
-/// **O quê:** argv do `fetch` pra ler texto (`-o -`, sem barra de progresso, timeout 20s). PURA.
-/// **Onde:** [`get_text`] e a leitura do release no FreeBSD sem curl.
-pub fn fetch_texto_args(url: &str) -> Vec<String> {
-    ["-q", "-T", "20", "-o", "-", url].iter().map(|s| s.to_string()).collect()
-}
-
-/// **O quê:** argv do `fetch` pra gravar `url` em `dest` (`-o <arquivo> <url>`). PURA.
-/// **Onde:** [`download`] no FreeBSD sem curl.
-pub fn fetch_download_args(dest: &str, url: &str) -> Vec<String> {
-    ["-o", dest, url].iter().map(|s| s.to_string()).collect()
-}
-
-/// **O quê:** traduz o resultado de um `fetch` de sonda no código HTTP que o resto do módulo
-/// já sabe classificar (`200`, `404`, `403`, `000`). PURA.
-/// **Onde:** [`asset_existe`] e [`url_do_ultimo_release_tipado`] no modo `Fetch`.
-pub fn http_de_fetch(res: &Result<String, String>) -> &'static str {
-    match res {
-        Ok(_) => "200",
-        Err(e) if e.contains("404") || e.contains("Not Found") => "404",
-        Err(e) if e.contains("403") || e.contains("429") => "403",
-        Err(_) => "000",
-    }
-}
-
-/// **O quê:** tira de uma página de release do GitHub o `href` do `rel="canonical"` (que, para
-/// `/releases/latest`, é a URL da tag). PURA.
-/// **Onde:** [`url_do_ultimo_release_tipado`] no modo `Fetch` (o `fetch` não expõe o redirect).
-pub fn canonical_da_pagina(html: &str) -> Option<String> {
-    let i = html.find("rel=\"canonical\"")?;
-    let resto = &html[i..];
-    let j = resto.find("href=\"")? + 6;
-    let fim = resto[j..].find('"')?;
-    Some(resto[j..j + fim].to_string())
-}
 
 /// **O quê:** lê o corpo de `url` como texto. `None` se falhar (rede fora, HTTP >= 400).
 /// Timeout curto — um `status` que pendura por minutos é pior que um que diz "não sei".
 ///
 /// **Onde:** [`crate::atualizar::versao`], ao ler o `version` do `Cargo.toml` no `main`.
-pub fn get_text(url: &str) -> Option<String> {
-    #[cfg(not(windows))]
-    {
-        if cliente() == Cliente::Fetch {
-            let a = fetch_texto_args(url);
-            return util::capture("fetch", &a.iter().map(String::as_str).collect::<Vec<_>>());
-        }
-        util::capture("curl", &["-fsSL", "-m", "20", "-H", UA, url])
-    }
-    #[cfg(windows)]
-    {
-        if let Some(c) = curl_do_windows() {
-            return util::capture(c, &["-fsSL", "-m", "20", "-H", UA, url]);
-        }
-        let ps = format!(
-            "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; \
-             (Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 -Uri '{url}').Content"
-        );
-        util::capture("powershell", &["-NoProfile", "-Command", &ps])
-    }
+pub fn get_text(ctx: &Ctx, url: &str) -> Option<String> {
+    ctx.plat.rede.texto(url)
 }
 
 /// **O quê:** [`get_text`] com UM cabeçalho extra (`"Accept: application/vnd.github.sha"`).
-/// `None` se falhar. No Windows só com `curl` (sem ele, `None`: o chamador diz a causa).
+/// `None` se falhar ou se o SO não consegue enviar cabeçalho (o chamador diz a causa).
 ///
 /// **Onde:** [`crate::atualizar::divergencia`], na consulta de commit pela API — só quando o
 /// `git` não existe.
-pub fn get_text_com_cabecalho(url: &str, cabecalho: &str) -> Option<String> {
-    #[cfg(not(windows))]
-    {
-        // O `fetch` não envia cabeçalho arbitrário: sem curl esta consulta (só usada quando
-        // não há `git`) devolve `None`, e o chamador já diz a causa.
-        if cliente() == Cliente::Fetch {
-            return None;
-        }
-        util::capture("curl", &["-fsSL", "-m", "20", "-H", UA, "-H", cabecalho, url])
-    }
-    #[cfg(windows)]
-    {
-        let c = curl_do_windows()?;
-        util::capture(c, &["-fsSL", "-m", "20", "-H", UA, "-H", cabecalho, url])
-    }
+pub fn get_text_com_cabecalho(ctx: &Ctx, url: &str, cabecalho: &str) -> Option<String> {
+    ctx.receitas.texto_com_cabecalho(url, cabecalho)
 }
 
 /// **O quê:** baixa `url` para `dest`. `true` se o arquivo ficou gravado.
@@ -145,44 +48,14 @@ pub fn get_text_com_cabecalho(url: &str, cabecalho: &str) -> Option<String> {
 ///
 /// **Por que devolve `bool` e não `Result`:** o chamador não trata as causas de forma
 /// diferente — asset ausente (404), rede fora e disco cheio levam todos ao mesmo lugar:
-/// compilar do fonte. O `curl` já imprimiu a causa no terminal do usuário (a saída é herdada),
-/// então a informação não se perde; o que sobe é a decisão.
-pub fn download(url: &str, dest: &Path) -> bool {
-    let Some(dest_s) = dest.to_str() else {
-        return false;
-    };
-    #[cfg(not(windows))]
-    {
-        if cliente() == Cliente::Fetch {
-            let a = fetch_download_args(dest_s, url);
-            let a: Vec<&str> = a.iter().map(String::as_str).collect();
-            return util::run_inherit("fetch", &a).is_ok() && dest.is_file();
+/// compilar do fonte. A causa, porém, NÃO se perde: vai para o stderr (piso 4).
+pub fn download(ctx: &Ctx, url: &str, dest: &Path) -> bool {
+    match ctx.plat.rede.baixar(url, dest) {
+        Ok(()) => dest.is_file(),
+        Err(e) => {
+            eprintln!("aviso: {e}");
+            false
         }
-        util::run_inherit("curl", &["-fSL", "-o", dest_s, url]).is_ok() && dest.is_file()
-    }
-    #[cfg(windows)]
-    {
-        if let Some(c) = curl_do_windows() {
-            return util::run_inherit(c, &["-fSL", "-o", dest_s, url]).is_ok() && dest.is_file();
-        }
-        let ps = format!(
-            "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; \
-             Invoke-WebRequest -UseBasicParsing -Uri '{url}' -OutFile '{dest_s}'"
-        );
-        util::run_inherit("powershell", &["-NoProfile", "-Command", &ps]).is_ok() && dest.is_file()
-    }
-}
-
-/// **O quê:** qual `curl` usar no Windows, se houver. `None` manda o chamador para o
-/// PowerShell. **Onde:** [`get_text`] e [`download`].
-#[cfg(windows)]
-fn curl_do_windows() -> Option<&'static str> {
-    if super::bin::binary_in_path("curl.exe") {
-        Some("curl.exe")
-    } else if super::bin::binary_in_path("curl") {
-        Some("curl")
-    } else {
-        None
     }
 }
 
@@ -218,51 +91,14 @@ pub fn url_do_cargo_toml(repo: &str) -> String {
 /// **Por que o redirect e não a API:** `github.com/<repo>/releases/latest` é página web, sem a
 /// cota de 60/h por IP da API (ver [`url_do_cargo_toml`]). Uma falha continua sendo erro
 /// EXPLÍCITO — nunca vira `None` mudo que o chamador confunda com "sem release".
-pub fn url_do_ultimo_release(repo: &str) -> Result<String, String> {
-    url_do_ultimo_release_tipado(repo).map_err(|(_, msg)| msg)
+pub fn url_do_ultimo_release(ctx: &Ctx, repo: &str) -> Result<String, String> {
+    url_do_ultimo_release_tipado(ctx, repo).map_err(|(_, msg)| msg)
 }
 
 /// **O quê:** [`url_do_ultimo_release`] com a [`Causa`] da falha. **Onde:** o `status`, que
 /// precisa dizer SE foi rede, 404 ou cota — e não um "? (rede)" genérico.
-pub fn url_do_ultimo_release_tipado(repo: &str) -> Result<String, (Causa, String)> {
-    let url = format!("https://github.com/{repo}/releases/latest");
-    #[cfg(not(windows))]
-    let saida = if cliente() == Cliente::Fetch {
-        let a = fetch_texto_args(&url);
-        let r = util::run("fetch", &a.iter().map(String::as_str).collect::<Vec<_>>());
-        match (&r, http_de_fetch(&r)) {
-            (Ok(html), _) => canonical_da_pagina(html).map(|u| format!("302 {u}")),
-            (_, cod) => Some(format!("{cod} ")),
-        }
-    } else {
-        util::capture(
-            "curl",
-            &[
-                "-sS",
-                "-m",
-                "20",
-                "-H",
-                UA,
-                "-o",
-                "/dev/null",
-                "-w",
-                "%{http_code} %{redirect_url}",
-                &url,
-            ],
-        )
-    };
-    #[cfg(windows)]
-    let saida = {
-        let ps = format!(
-            "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; \
-             $r=Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec 20 -Uri '{url}'; \
-             if($r.BaseResponse.ResponseUri){{$u=$r.BaseResponse.ResponseUri.AbsoluteUri}}\
-             else{{$u=$r.BaseResponse.RequestMessage.RequestUri.AbsoluteUri}}; \
-             \"302 $u\""
-        );
-        util::capture("powershell", &["-NoProfile", "-Command", &ps])
-    };
-    let saida = saida.ok_or_else(|| {
+pub fn url_do_ultimo_release_tipado(ctx: &Ctx, repo: &str) -> Result<String, (Causa, String)> {
+    let saida = ctx.receitas.sondar_ultimo_release(repo).ok_or_else(|| {
         (
             Causa::Network,
             format!(
@@ -302,8 +138,8 @@ impl Causa {
     }
 }
 
-/// **O quê:** interpreta a saída `"<http_code> <redirect_url>"` do `curl`, com a causa
-/// TIPADA. Função PURA.
+/// **O quê:** interpreta a saída `"<http_code> <redirect_url>"` da sonda de release, com a
+/// causa TIPADA. Função PURA.
 ///
 /// **Onde:** [`redirect_do_release`], [`url_do_ultimo_release_tipado`] e os testes.
 pub fn classificar_redirect(repo: &str, saida: &str) -> Result<String, (Causa, String)> {
@@ -336,10 +172,10 @@ pub fn classificar_redirect(repo: &str, saida: &str) -> Result<String, (Causa, S
     }
 }
 
-/// **O quê:** interpreta a saída `"<http_code> <redirect_url>"` do `curl` (só a mensagem).
+/// **O quê:** interpreta a saída `"<http_code> <redirect_url>"` da sonda (só a mensagem).
 /// Função PURA.
 ///
-/// **Onde:** [`url_do_ultimo_release`], e os testes — o `curl` não entra na suíte.
+/// **Onde:** os testes — a sonda de rede não entra na suíte.
 ///
 /// **Por que separar o código HTTP:** 403/429 do GitHub é cota ou bloqueio, e dizer "sem
 /// release" sobre isso mandaria a pessoa procurar o problema no lugar errado.
@@ -347,7 +183,7 @@ pub fn redirect_do_release(repo: &str, saida: &str) -> Result<String, String> {
     classificar_redirect(repo, saida).map_err(|(_, msg)| msg)
 }
 
-/// **O quê:** interpreta o `%{http_code}` do `curl` da sonda de asset. Função PURA.
+/// **O quê:** interpreta o código HTTP da sonda de asset. Função PURA.
 ///
 /// **Onde:** [`asset_existe`], e os testes.
 ///
@@ -373,87 +209,20 @@ pub fn classificar_http_do_asset(saida: &str) -> Result<bool, String> {
 /// **Onde:** [`crate::atualizar::alvo::consultar_publicado`], para saber se o release tem o
 /// asset desta plataforma ANTES de mirar nele.
 ///
-/// **Por que `-r 0-0` e não `HEAD`:** o download passa por redirect para um storage assinado
-/// que nem sempre aceita `HEAD`. **Sem `-f`**, como [`url_do_ultimo_release`]: o código HTTP
-/// vem por `-w` e a sonda não escreve nada no terminal da pessoa.
-pub fn asset_existe(url: &str) -> Result<bool, String> {
-    #[cfg(not(windows))]
-    let saida = if cliente() == Cliente::Fetch {
-        // `-s`: só confere (tamanho) sem baixar o corpo; o erro traz o motivo (404 etc.).
-        Some(http_de_fetch(&util::run("fetch", &["-s", "-T", "20", url])).to_string())
-    } else {
-        util::capture(
-            "curl",
-            &[
-                "-sSL",
-                "-m",
-                "20",
-                "-H",
-                UA,
-                "-r",
-                "0-0",
-                "-o",
-                "/dev/null",
-                "-w",
-                "%{http_code}",
-                url,
-            ],
-        )
-    };
-    #[cfg(windows)]
-    let saida = {
-        let ps = format!(
-            "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; \
-             try {{ (Invoke-WebRequest -UseBasicParsing -Method Head -TimeoutSec 20 -Uri '{url}').StatusCode }} \
-             catch {{ if($_.Exception.Response){{[int]$_.Exception.Response.StatusCode}}else{{0}} }}"
-        );
-        util::capture("powershell", &["-NoProfile", "-Command", &ps])
-    };
+/// **Por que a sonda é do SO e a classificação é daqui:** o download passa por redirect para
+/// um storage assinado que nem sempre aceita `HEAD`; como obter o código HTTP muda por SO
+/// (`curl -w` vs PowerShell), mas o que cada código SIGNIFICA não muda.
+pub fn asset_existe(ctx: &Ctx, url: &str) -> Result<bool, String> {
+    let saida = ctx.receitas.sondar_asset(url);
     classificar_http_do_asset(saida.as_deref().unwrap_or(""))
 }
 
 #[cfg(test)]
 mod tests {
-    /// FreeBSD sem curl usa `fetch`; com curl, ou em qualquer outro SO, segue no curl.
-    #[test]
-    fn cliente_fetch_so_no_freebsd_sem_curl() {
-        assert_eq!(escolher_cliente(true, false), Cliente::Fetch);
-        assert_eq!(escolher_cliente(true, true), Cliente::Curl);
-        assert_eq!(escolher_cliente(false, false), Cliente::Curl);
-        assert_eq!(escolher_cliente(false, true), Cliente::Curl);
-    }
+    use super::*;
+    use crate::nucleo::plataforma;
 
-    /// Os comandos do `fetch` são os do pedido: `-o - <url>` e `-o <arquivo> <url>`.
-    #[test]
-    fn comandos_do_fetch() {
-        assert_eq!(baixar_para_pipe(Cliente::Fetch, "https://x/y"), "fetch -o - https://x/y");
-        assert!(baixar_para_pipe(Cliente::Curl, "https://x/y").starts_with("curl "));
-        let t = fetch_texto_args("https://x/y");
-        assert!(t.windows(2).any(|w| w == ["-o", "-"]) && t.last().unwrap() == "https://x/y");
-        assert_eq!(fetch_download_args("/tmp/a", "https://x/y"), ["-o", "/tmp/a", "https://x/y"]);
-    }
-
-    /// A sonda por `fetch` cai nos MESMOS códigos HTTP que o resto classifica.
-    #[test]
-    fn sonda_do_fetch_vira_codigo_http() {
-        assert_eq!(http_de_fetch(&Ok(String::new())), "200");
-        assert_eq!(http_de_fetch(&Err("fetch: https://x: Not Found".into())), "404");
-        assert_eq!(http_de_fetch(&Err("fetch: https://x: Forbidden 403".into())), "403");
-        assert_eq!(http_de_fetch(&Err("fetch: sem rota".into())), "000");
-        assert_eq!(classificar_http_do_asset(http_de_fetch(&Ok(String::new()))), Ok(true));
-    }
-
-    /// A URL da tag sai do `rel="canonical"` da página do release.
-    #[test]
-    fn canonical_da_pagina_acha_a_tag() {
-        let html = r#"<head><link rel="canonical" href="https://github.com/o/r/releases/tag/v1.2.3"></head>"#;
-        assert_eq!(
-            canonical_da_pagina(html).as_deref(),
-            Some("https://github.com/o/r/releases/tag/v1.2.3")
-        );
-        assert_eq!(canonical_da_pagina("<html></html>"), None);
-    }
-
+    /// A classificação do redirect cai nas causas tipadas, com slug estável.
     #[test]
     fn causa_do_redirect_e_tipada_com_slug_estavel() {
         let r = "schematizeme/x";
@@ -473,9 +242,6 @@ mod tests {
                 .to_vec();
         assert_eq!(slugs, ["not_found", "network", "rate_limited", "unexpected"]);
     }
-
-    use super::*;
-    use crate::nucleo::plataforma;
 
     /// **O que trava:** a URL do asset é EXATAMENTE a que o updater montava. O porte é
     /// movimento (D4) — se este teste falhar, o download passou a apontar para outro lugar.
@@ -524,7 +290,7 @@ mod tests {
         assert!(classificar_http_do_asset("503").unwrap_err().contains("503"));
     }
 
-    /// A saída do `curl` vira URL de release, ou um erro que diz a causa.
+    /// A saída da sonda vira URL de release, ou um erro que diz a causa.
     #[test]
     fn redirect_do_release_distingue_cota_de_ausencia() {
         let r = "schematizeme/schematize-cli";

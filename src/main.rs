@@ -1,9 +1,6 @@
-//! **schematize-market** — instalar e remover programas.
-
-mod cli;
-
-use clap::Parser;
-use cli::args::{Cli, Cmd};
+//! **schematize-market** — instalar e remover programas. O binário só monta a plataforma Unix e
+//! as receitas Unix e entrega à lib (`market::cli::run`); o Windows tem o seu `main` em
+//! `schematize_windows_rs` (ADR-0026).
 
 /// Devolve o `SIGPIPE` ao padrão do Unix — sem isto, `… | head` panica. Ver o Deployer.
 #[cfg(unix)]
@@ -13,32 +10,20 @@ fn restaurar_sigpipe() {
         libc::signal(libc::SIGPIPE, libc::SIG_DFL);
     }
 }
-#[cfg(not(unix))]
-fn restaurar_sigpipe() {}
 
+/// Ponto de entrada Unix: costuras reais + receitas Unix, e o código de saída da CLI.
+#[cfg(unix)]
 fn main() {
     restaurar_sigpipe();
-    let cli = Cli::parse();
-    let r = match cli.cmd {
-        Cmd::List { wait, json } => cli::lista::list_cmd(wait, json),
-        Cmd::Install { what, all, method, dry_run, yes } => {
-            cli::instalar::install_cmd(what.as_deref(), all, method, dry_run, yes)
-        }
-        Cmd::Remove { what, method, dry_run, yes } => {
-            cli::instalar::remove_cmd(&what, method, dry_run, yes)
-        }
-        Cmd::Switch { lang, to, dry_run, yes } => {
-            market::environments::switch(&lang, &to, dry_run, yes)
-        }
-        Cmd::Update { force, dry_run } => cli::atualizar::update_cmd(force, dry_run),
-        Cmd::Pin { version } => cli::atualizar::pin_cmd(&version),
-        Cmd::Unpin => cli::atualizar::unpin_cmd(),
-        Cmd::Status { json } => cli::atualizar::status_cmd(json),
-        Cmd::Run => cli::atualizar::run_cmd(),
-        Cmd::Desktop { install, remove } => cli::lista::desktop_cmd(install, remove),
-    };
-    if let Err(e) = r {
-        eprintln!("erro: {e}");
-        std::process::exit(1);
-    }
+    let plat = schematize_plataforma::seams::Plataforma::unix();
+    let code = market::cli::run(std::env::args_os(), &plat, &market::receitas_unix::ReceitasUnix);
+    std::process::exit(code);
+}
+
+/// Fora do Unix este binário não existe: o Windows usa o `schematize-market.exe` do repo
+/// `schematize_windows_rs`, que fornece o próprio `Plataforma` e `Receitas`.
+#[cfg(not(unix))]
+fn main() {
+    eprintln!("erro: este binário é Unix-only; no Windows use o schematize_windows_rs.");
+    std::process::exit(2);
 }

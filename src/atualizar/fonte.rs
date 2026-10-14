@@ -15,6 +15,7 @@
 //! só o que mudou recompila, e as ~226 deps comuns aos repos compilam UMA vez.
 
 use super::binario::{limpa_interregno, substitui_binario};
+use crate::ctx::Ctx;
 use crate::nucleo::{plataforma, util};
 use std::path::Path;
 
@@ -25,9 +26,9 @@ use std::path::Path;
 /// **A ordem importa:** a PURGA das cópias-fantasma vem antes de instalar, o CLI antes da GUI
 /// (a GUI depende do crate dele), e a limpeza dos `target/` antigos só no fim — se o build
 /// falhar, o cache anterior continua lá.
-pub fn build_from_source() -> Result<(), String> {
-    let cargo = plataforma::ensure_toolchain()?;
-    plataforma::ensure_build_deps()?;
+pub fn build_from_source(ctx: &Ctx) -> Result<(), String> {
+    let cargo = ctx.receitas.garantir_toolchain(ctx.plat)?;
+    ctx.receitas.garantir_build_deps(ctx.plat)?;
 
     let cargo_s = cargo.to_str().unwrap_or("cargo");
     let (cli_name, gui_name) = plataforma::bin_names();
@@ -48,7 +49,7 @@ pub fn build_from_source() -> Result<(), String> {
     };
 
     // CLI (schematize) — repo schematize-cli, crate na raiz.
-    build_one(cargo_s, plataforma::APP_REPO, feats, None, &cli_name, &dir.join(&cli_name))?;
+    build_one(ctx, cargo_s, plataforma::APP_REPO, feats, None, &cli_name, &dir.join(&cli_name))?;
     limpa_interregno(&dir, &i_cli);
 
     // GUI (schematize-gui) — repo schematize_gui_slint. A GUI depende do crate `schematize`
@@ -58,6 +59,7 @@ pub fn build_from_source() -> Result<(), String> {
     // novo. `cargo update -p schematize` avança o git-dep para o HEAD do main ANTES de
     // compilar → a versão embutida bate.
     build_one(
+        ctx,
         cargo_s,
         plataforma::GUI_REPO,
         feats,
@@ -70,15 +72,15 @@ pub fn build_from_source() -> Result<(), String> {
     // Encerra qualquer GUI ANTIGA ainda aberta: só fechar a janela não bastava (o processo
     // velho seguia vivo e o relaunch reusava a versão anterior). Mata com os dois nomes — o
     // processo em execução pode ter subido pelo lançador do interregno.
-    kill_stale_gui(&gui_name);
-    kill_stale_gui(&i_gui);
+    kill_stale_gui(ctx, &gui_name);
+    kill_stale_gui(ctx, &i_gui);
 
     // A janela do gestor de atualizações — OPCIONAL: se o build falhar, o update NÃO falha (o
     // market e o app já estão instalados; é só chrome). Não depende do crate `schematize`,
     // então sem `refresh_dep`.
     let ugui = plataforma::gestor_gui_bin();
     if let Err(e) =
-        build_one(cargo_s, plataforma::GESTOR_GUI_REPO, &[], None, &ugui, &dir.join(&ugui))
+        build_one(ctx, cargo_s, plataforma::GESTOR_GUI_REPO, &[], None, &ugui, &dir.join(&ugui))
     {
         println!("aviso: build da janela do gestor falhou (opcional, seguindo): {e}");
     }
@@ -118,6 +120,7 @@ fn purgar_fantasmas(dir: &Path) {
 /// a rede cair, segue com o lock existente (offline ainda compila). Sem isto, a versão
 /// embutida trava no commit que o `Cargo.lock` commitado pina.
 pub fn build_one(
+    ctx: &Ctx,
     cargo: &str,
     repo: &str,
     extra: &[&str],
@@ -157,7 +160,7 @@ pub fn build_one(
     if !built.is_file() {
         return Err(format!("o build não produziu {}", built.display()));
     }
-    substitui_binario(&built, dst)
+    substitui_binario(ctx, &built, dst)
 }
 
 /// **O quê:** deixa o checkout `src` de `repo` na versão do `main`. Clona se não existir;
@@ -190,15 +193,9 @@ fn sync_checkout(repo: &str, src: &Path) -> Result<(), String> {
 /// O usuário reclamava de "atualizei mas abre a versão antiga" porque fechar a janela não
 /// matava o processo. Best-effort e cross-OS; nunca falha o update. NÃO casa o market nem o
 /// CLI — só o binário exato da GUI (`pkill -x`, não substring).
-fn kill_stale_gui(gui_name: &str) {
-    #[cfg(windows)]
-    {
-        let _ = util::capture("taskkill", &["/F", "/IM", &format!("{gui_name}.exe")]);
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = util::capture("pkill", &["-x", gui_name]);
-    }
+fn kill_stale_gui(ctx: &Ctx, gui_name: &str) {
+    // A costura valida o nome e registra a falha no stderr (nunca engolida).
+    ctx.plat.substituicao.encerrar_gui(gui_name);
 }
 
 /// **O quê:** remove os `target/` por-repo que existiam ANTES do target compartilhado.

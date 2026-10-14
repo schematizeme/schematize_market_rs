@@ -11,7 +11,8 @@
 //! Porte do `install.rs` do `schematize_updater_rs` (ADR-0013), sob o D4 — o mecanismo é o
 //! mesmo, incluindo o teste de regressão do `Text file busy` que o motivou.
 
-use crate::nucleo::{plataforma, rede, util};
+use crate::ctx::Ctx;
+use crate::nucleo::{plataforma, rede};
 use std::path::Path;
 
 /// **O quê:** tenta baixar e instalar os binários pré-compilados da versão `target`.
@@ -24,7 +25,12 @@ use std::path::Path;
 /// `--version` antes de ir para o lugar. Um binário compilado contra uma glibc mais nova, ou
 /// para a arquitetura errada, baixa com HTTP 200 e não roda — e instalá-lo por cima do que
 /// funcionava deixaria a máquina sem app, com o gestor achando que deu certo.
-pub fn try_binary(target: &str, cli_asset: &str, gui_asset: &str) -> Result<bool, String> {
+pub fn try_binary(
+    ctx: &Ctx,
+    target: &str,
+    cli_asset: &str,
+    gui_asset: &str,
+) -> Result<bool, String> {
     let tmp = plataforma::state_dir().join("dl");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp)
@@ -36,26 +42,26 @@ pub fn try_binary(target: &str, cli_asset: &str, gui_asset: &str) -> Result<bool
     let tag = format!("v{target}");
 
     // CLI é obrigatório; ausente (404) → não há caminho binário para esta versão.
-    if !rede::download(&rede::url_de_asset(plataforma::APP_REPO, &tag, cli_asset), &cli_tmp) {
+    if !rede::download(ctx, &rede::url_de_asset(plataforma::APP_REPO, &tag, cli_asset), &cli_tmp) {
         return Ok(false);
     }
-    make_executable(&cli_tmp);
+    make_executable(ctx, &cli_tmp);
     if !executa_e_reporta(&cli_tmp, target) {
         return Ok(false);
     }
     // GUI é opcional: se o asset não existir, instala só o CLI.
     let has_gui =
-        rede::download(&rede::url_de_asset(plataforma::APP_REPO, &tag, gui_asset), &gui_tmp);
+        rede::download(ctx, &rede::url_de_asset(plataforma::APP_REPO, &tag, gui_asset), &gui_tmp);
     if has_gui {
-        make_executable(&gui_tmp);
+        make_executable(ctx, &gui_tmp);
     }
 
     let dir = plataforma::install_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("não consegui criar {}: {e}", dir.display()))?;
-    place(&cli_tmp, &dir.join(&cli_name))?;
+    place(ctx, &cli_tmp, &dir.join(&cli_name))?;
     if has_gui {
-        let _ = place(&gui_tmp, &dir.join(&gui_name));
+        let _ = place(ctx, &gui_tmp, &dir.join(&gui_name));
     }
     let (i_cli, i_gui) = plataforma::bin_names_interregno();
     limpa_interregno(&dir, &i_cli);
@@ -136,26 +142,28 @@ fn versao_do_candidato(candidato: &Path) -> Option<String> {
 /// lançador de desktop, ele pode não existir. Falhar aqui é best-effort dos dois jeitos, mas a
 /// consequência não passa despercebida: um binário sem bit de execução não responde
 /// `--version`, e [`executa_e_reporta`] recusa o candidato antes de ele substituir nada.
-pub fn make_executable(p: &Path) {
-    util::definir_modo(p, 0o755);
+pub fn make_executable(ctx: &Ctx, p: &Path) {
+    if let Err(e) = ctx.plat.substituicao.tornar_executavel(p) {
+        eprintln!("aviso: {e}");
+    }
 }
 
 /// **O quê:** move `src` → `dst` (rename atômico no mesmo FS; fallback para a substituição
 /// segura). **Onde:** [`try_binary`], ao tirar o download do temporário.
 ///
-/// No Windows, se o destino estiver em uso, [`substitui_binario`] aposenta o antigo como
-/// `.old` antes — não dá para sobrescrever um `.exe` em execução.
-pub fn place(src: &Path, dst: &Path) -> Result<(), String> {
+/// Se o destino estiver em uso, a costura `plat.substituicao` decide como trocar (no Unix,
+/// rename atômico sobre o inode em uso).
+pub fn place(ctx: &Ctx, src: &Path, dst: &Path) -> Result<(), String> {
     garante_diretorio_pai(dst)?;
     // Caminho feliz: o download já está no mesmo sistema de arquivos → um rename resolve.
     if std::fs::rename(src, dst).is_ok() {
-        make_executable(dst);
+        make_executable(ctx, dst);
         return Ok(());
     }
     // Senão (EXDEV, ou destino travado no Windows), cai no mesmo mecanismo do build: grava ao
     // lado do destino e renomeia por cima. NUNCA `fs::copy` direto no destino — é o que dava
     // `Text file busy` com o agente rodando.
-    substitui_binario(src, dst)
+    substitui_binario(ctx, src, dst)
 }
 
 /// **O quê:** troca um binário que pode estar EM EXECUÇÃO, sem matar ninguém.
@@ -172,33 +180,17 @@ pub fn place(src: &Path, dst: &Path) -> Result<(), String> {
 /// executável em uso é permitido: quem já está rodando continua no inode antigo, e a próxima
 /// execução pega o novo. Nada de pedir para o usuário fechar o app.
 ///
-/// No Windows não existe esse truque (o arquivo fica travado), então lá seguimos aposentando
-/// o antigo como `.old` antes de gravar.
+/// A mecânica mora na costura `Substituicao` (`schematize_plataforma`); o Windows a implementa
+/// à parte (arquivo travado: aposenta o antigo antes de gravar).
 ///
 /// **O que ele NÃO faz, e por que isso importa (D3/R1):** não verifica o candidato. Quem
 /// substitui o binário do PRÓPRIO market tem de verificar ANTES — ver
 /// [`super::selfupdate::trocar_com_rede`]. Aqui a verificação seria tarde demais para um
 /// candidato que não executa.
-pub fn substitui_binario(src: &Path, dst: &Path) -> Result<(), String> {
-    #[cfg(windows)]
-    if dst.exists() {
-        let old = dst.with_extension("old");
-        let _ = std::fs::remove_file(&old);
-        let _ = std::fs::rename(dst, &old);
-    }
-    // Máquina só com binário (sem cargo) não tem `~/.cargo/bin`: cria, ou o install falha.
-    garante_diretorio_pai(dst)?;
-    let tmp = caminho_temporario(dst);
-    let _ = std::fs::remove_file(&tmp);
-    std::fs::copy(src, &tmp).map_err(|e| format!("não consegui gravar {}: {e}", tmp.display()))?;
-    make_executable(&tmp);
-    if let Err(e) = std::fs::rename(&tmp, dst) {
-        // Não deixa o `.novo` órfão: um temporário de um binário inteiro por tentativa
-        // frustrada vira lixo que ninguém sabe de onde veio.
-        let _ = std::fs::remove_file(&tmp);
-        return Err(format!("não consegui substituir {}: {e}", dst.display()));
-    }
-    Ok(())
+pub fn substitui_binario(ctx: &Ctx, src: &Path, dst: &Path) -> Result<(), String> {
+    // Máquina só com binário (sem cargo) não tem `~/.cargo/bin`: a costura cria o diretório,
+    // grava `<destino>.novo` ao lado e renomeia por cima (no Windows, aposenta o antigo).
+    ctx.plat.substituicao.substituir(src, dst)
 }
 
 /// **O quê:** cria o diretório-pai de `dst` (e ancestrais) se não existir; erro propagado com
@@ -266,7 +258,7 @@ mod tests {
 
         // Um executável de verdade no lugar do destino, e um processo RODANDO ele.
         std::fs::copy("/bin/sleep", &alvo).unwrap();
-        make_executable(&alvo);
+        make_executable(&Ctx::de_teste(), &alvo);
         // O spawn também pode esbarrar no ETXTBSY da corrida descrita em `versao_do_candidato`
         // (outra thread da suíte forkando enquanto gravamos). Insiste pelo mesmo motivo.
         let mut filho = None;
@@ -313,7 +305,8 @@ mod tests {
         assert_eq!(std::fs::copy("/bin/true", &alvo).unwrap_err().raw_os_error(), Some(26));
 
         // O jeito NOVO (gravar ao lado + renomear) tem de passar, com o processo vivo.
-        substitui_binario(Path::new("/bin/true"), &alvo).expect("substituição devia funcionar");
+        substitui_binario(&Ctx::de_teste(), Path::new("/bin/true"), &alvo)
+            .expect("substituição devia funcionar");
         assert!(filho.try_wait().unwrap().is_none(), "o processo antigo tem de seguir vivo");
 
         // E o destino agora é o binário NOVO (o `true` sai com 0 na hora; o `sleep` não).
@@ -359,7 +352,7 @@ mod tests {
             "temporário fora do diretório do destino → rename falha com EXDEV"
         );
 
-        substitui_binario(Path::new("/bin/true"), &alvo).unwrap();
+        substitui_binario(&Ctx::de_teste(), Path::new("/bin/true"), &alvo).unwrap();
         assert!(alvo.is_file());
         // não deixou lixo para trás
         assert!(!base.join("bin.novo").exists());
@@ -381,11 +374,12 @@ mod tests {
         let dst = base.join("home/.cargo/bin/schematize-market");
         assert!(!dst.parent().unwrap().exists());
 
-        substitui_binario(&fonte, &dst).expect("devia criar ~/.cargo/bin e instalar");
+        substitui_binario(&Ctx::de_teste(), &fonte, &dst)
+            .expect("devia criar ~/.cargo/bin e instalar");
         assert!(dst.is_file() && dst.parent().unwrap().is_dir());
 
         let dst2 = base.join("home2/.cargo/bin/x");
-        place(&fonte, &dst2).expect("place também cria o diretório");
+        place(&Ctx::de_teste(), &fonte, &dst2).expect("place também cria o diretório");
         assert!(dst2.is_file());
         let _ = std::fs::remove_dir_all(&base);
     }
@@ -400,7 +394,7 @@ mod tests {
         let alvo = base.join("alvo");
         std::fs::create_dir_all(alvo.join("dentro")).unwrap();
 
-        let r = substitui_binario(Path::new("/bin/true"), &alvo);
+        let r = substitui_binario(&Ctx::de_teste(), Path::new("/bin/true"), &alvo);
         assert!(r.is_err(), "renomear por cima de um diretório não-vazio tinha de falhar");
         assert!(!caminho_temporario(&alvo).exists(), "o `.novo` ficou órfão");
         let _ = std::fs::remove_dir_all(&base);
@@ -418,7 +412,7 @@ mod tests {
         // Um "binário" que responde `--version` com a versão certa.
         let bom = base.join("bom");
         std::fs::write(&bom, "#!/bin/sh\necho \"schematize-market 9.9.9\"\n").unwrap();
-        make_executable(&bom);
+        make_executable(&Ctx::de_teste(), &bom);
         assert!(executa_e_reporta(&bom, "9.9.9"), "a versão certa tinha de passar");
         assert!(executa_e_reporta(&bom, ""), "sem versão esperada, basta executar");
         assert!(!executa_e_reporta(&bom, "1.0.0"), "versão ERRADA não pode passar");

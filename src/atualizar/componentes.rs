@@ -13,6 +13,7 @@ use super::{
     alvo, binario, exibir, fonte, limpeza, ou_nenhum, release, selfupdate, versao, AppGerido,
     Politica,
 };
+use crate::ctx::Ctx;
 use crate::nucleo::i18n::tf;
 use crate::nucleo::plataforma;
 
@@ -24,17 +25,17 @@ use crate::nucleo::plataforma;
 /// Enquanto a atualização dos outros apps morava lá dentro, ela **nunca rodava** quando havia
 /// asset publicado — que passa a ser o caso normal depois de um release. Separar é o que
 /// garante que os dois passos aconteçam, em qualquer caminho.
-pub(super) fn atualizar_app(target: &str) -> Result<(), String> {
+pub(super) fn atualizar_app(ctx: &Ctx, target: &str) -> Result<(), String> {
     // D7: só quem JÁ compila do fonte cai no fonte. Quem instala por binário e não tem asset
     // recebe a explicação — nunca um build implícito que pede `sudo` sem terminal.
     let metodo = alvo::metodo_de(plataforma::APP_REPO);
 
     // 1) CAMINHO RÁPIDO — binário pré-compilado, se houver asset para esta plataforma.
     if let Some((cli_asset, gui_asset)) = plataforma::asset_names() {
-        match binario::try_binary(target, &cli_asset, &gui_asset) {
+        match binario::try_binary(ctx, target, &cli_asset, &gui_asset) {
             Ok(true) => {
                 metodo::registrar(plataforma::APP_REPO, alvo::Metodo::Binario);
-                finish(target);
+                finish(ctx, target);
                 return Ok(());
             }
             Ok(false) if metodo == alvo::Metodo::Binario => {
@@ -55,9 +56,9 @@ pub(super) fn atualizar_app(target: &str) -> Result<(), String> {
 
     // 2) CAMINHO CONFIÁVEL — compila do fonte (funciona em qualquer SO com toolchain). Chega
     // aqui só quem já era do fonte, ou quem não tem binário nenhum para a plataforma.
-    fonte::build_from_source()?;
+    fonte::build_from_source(ctx)?;
     metodo::registrar(plataforma::APP_REPO, alvo::Metodo::Fonte);
-    finish(target);
+    finish(ctx, target);
     Ok(())
 }
 
@@ -73,13 +74,13 @@ pub(super) fn atualizar_app(target: &str) -> Result<(), String> {
 /// **O market é o caso especial:** trocar o próprio binário em execução é o único modo de
 /// falha capaz de deixar a máquina sem gestor nenhum, então ele vai por [`selfupdate`], que
 /// verifica o candidato antes da troca.
-pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
+pub(super) fn atualizar_componente(ctx: &Ctx, app: &AppGerido, force: bool) {
     let alvo_path = app.caminho();
     if app.politica == Politica::SeInstalado && !app.instalado() {
         return; // não instalado — e atualizar não é instalar.
     }
     let instalada = app.versao_instalada();
-    let alvo = alvo::alvo_de(app.repo);
+    let alvo = alvo::alvo_de(ctx, app.repo);
     let ultima = match &alvo {
         alvo::Alvo::Versao(v) | alvo::Alvo::SemAsset { versao: v } => Some(v.clone()),
         alvo::Alvo::Indisponivel(_) => None,
@@ -99,7 +100,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
     // asset (`Alvo::Versao`): sem binário publicado não há com o que trocar.
     let build = match (&alvo, force) {
         (alvo::Alvo::Versao(_), false) => {
-            divergencia::checar_app(app, instalada.as_deref(), ultima.as_deref())
+            divergencia::checar_app(ctx, app, instalada.as_deref(), ultima.as_deref())
         }
         _ => None,
     };
@@ -122,7 +123,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
     // CLI em dia (ou à frente) mas SEM a janela: completa o par antes de dizer "em dia".
     if !force && ver != Veredito::Atualizar && app.janela_ausente() {
         if let alvo::Alvo::Versao(v) = &alvo {
-            if completar_janela(app, v) {
+            if completar_janela(ctx, app, v) {
                 return;
             }
         }
@@ -163,7 +164,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
             return;
         }
         let metodo = alvo::metodo_de(app.repo);
-        let r = selfupdate::atualizar_a_si_mesmo(ultima.as_deref(), metodo);
+        let r = selfupdate::atualizar_a_si_mesmo(ctx, ultima.as_deref(), metodo);
         if let Err(e) = &r {
             println!("{}", tf("up.self_failed", &[("error", e)]));
         }
@@ -175,7 +176,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
     // Quem instalou por BINÁRIO atualiza por binário (D7/D8) — para todo app da tabela, não só
     // o hub. Sem asset: explica e para; NUNCA cai num build implícito (§37.48).
     match rota_do_componente(alvo::metodo_de(app.repo), &alvo) {
-        Rota::Release(v) => return atualizar_por_release(app, &v),
+        Rota::Release(v) => return atualizar_por_release(ctx, app, &v),
         Rota::SemBinario(v) => return println!("{}", alvo::mensagem_sem_binario(app.repo, &v)),
         Rota::Indisponivel => {
             println!("aviso: {}: não sei qual versão baixar — nada foi alterado.", app.bin);
@@ -186,7 +187,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
 
     // Mesma resolução de toolchain do build do app. Sem ela não há o que compilar — e isso é
     // aviso, não erro: quem não tem cargo continua com o que já tinha.
-    let cargo = match plataforma::ensure_toolchain() {
+    let cargo = match ctx.receitas.garantir_toolchain(ctx.plat) {
         Ok(c) => c,
         Err(e) => {
             println!("{}", tf("up.no_toolchain", &[("bin", app.bin), ("error", &e)]));
@@ -194,7 +195,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
         }
     };
     let cargo_s = cargo.to_str().unwrap_or("cargo");
-    match fonte::build_one(cargo_s, app.repo, &[], None, &app.bin_name(), &alvo_path) {
+    match fonte::build_one(ctx, cargo_s, app.repo, &[], None, &app.bin_name(), &alvo_path) {
         Ok(()) => {
             if let Err(e) = conferir_versao_instalada(app, &alvo_path, ultima.as_deref()) {
                 println!("{}", tf("up.comp_failed", &[("bin", app.bin), ("error", &e)]));
@@ -210,7 +211,7 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
             // delegada do hub diria "não instalada" DEPOIS de a pessoa ter instalado.
             if let Some((nome, dst)) = app.gui_nome_e_destino() {
                 let built = plataforma::shared_target_dir().join("release").join(&nome);
-                match binario::substitui_binario(&built, &dst) {
+                match binario::substitui_binario(ctx, &built, &dst) {
                     Ok(()) => println!("✓ {nome}"),
                     // Não derruba o componente: o headless JÁ está instalado e funcionando, e
                     // dizer "falhou" sobre isso mandaria a pessoa reinstalar o que já tem. Mas
@@ -229,10 +230,10 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
 /// porquê na tela (e, se não deu para confirmar, avisa). `true` = reinstalar.
 ///
 /// **Onde:** [`super::install_or_update`], antes do `--dry-run`/da atualização do app.
-pub(super) fn hub_diverge(instalada: Option<&str>, alvo: Option<&str>) -> bool {
+pub(super) fn hub_diverge(ctx: &Ctx, instalada: Option<&str>, alvo: Option<&str>) -> bool {
     let prov = divergencia::proveniencia_do_binario(&plataforma::app_bin(false));
     let v = ou_nenhum(instalada);
-    match divergencia::checar(plataforma::APP_REPO, instalada, alvo, &prov) {
+    match divergencia::checar(ctx, plataforma::APP_REPO, instalada, alvo, &prov) {
         Some(Decisao::Reinstalar(m)) => {
             println!("{}", divergencia::mensagem_reinstala("schematize", &v, &m));
             true
@@ -261,17 +262,17 @@ pub(super) fn veredito_com_build(ver: Veredito, build: Option<&Decisao>) -> Vere
 ///
 /// O market baixa só a janela da versão publicada. Os outros apps, instalados por binário,
 /// refazem o par do release; quem compilou do fonte recebe o aviso (não vira build implícito).
-fn completar_janela(app: &AppGerido, versao: &str) -> bool {
+fn completar_janela(ctx: &Ctx, app: &AppGerido, versao: &str) -> bool {
     println!("→ {}: a janela não está instalada — instalando a do release v{versao}.", app.bin);
     if app.politica == Politica::Sempre {
-        match selfupdate::instalar_janela_do_market(versao) {
+        match selfupdate::instalar_janela_do_market(ctx, versao) {
             Ok(()) => println!("✓ {}", plataforma::gestor_gui_bin()),
             Err(e) => println!("aviso: {}: não consegui instalar a janela: {e}", app.bin),
         }
         return false;
     }
     if alvo::metodo_de(app.repo) == alvo::Metodo::Binario {
-        atualizar_por_release(app, versao);
+        atualizar_por_release(ctx, app, versao);
         return true;
     }
     println!(
@@ -317,7 +318,7 @@ pub(super) fn rota_do_componente(metodo: alvo::Metodo, alvo: &alvo::Alvo) -> Rot
 /// `update` dos outros).
 ///
 /// **Onde:** [`atualizar_componente`], na rota [`Rota::Release`].
-fn atualizar_por_release(app: &AppGerido, versao: &str) {
+fn atualizar_por_release(ctx: &Ctx, app: &AppGerido, versao: &str) {
     let Some(assets) = release::assets_do_app(app) else {
         println!(
             "aviso: {}: esta plataforma não tem binário pré-compilado — nada foi alterado.",
@@ -327,7 +328,8 @@ fn atualizar_por_release(app: &AppGerido, versao: &str) {
     };
     println!("→ baixando o binário pré-compilado de {} v{versao}…", app.bin);
     let dest = release::destino_do_app(app);
-    let r = release::baixar_e_instalar(&release::RedeReal, app.repo, versao, &assets, &dest);
+    let r =
+        release::baixar_e_instalar(ctx, &release::RedeReal(ctx), app.repo, versao, &assets, &dest);
     match &r {
         Ok(()) => {
             metodo::registrar(app.repo, alvo::Metodo::Binario);
@@ -435,16 +437,15 @@ fn aposentar_nome_legado(app: &AppGerido) {
 
 /// **O quê:** pós-instalação — PATH, lançador e relatório honesto da versão que ficou.
 /// **Onde:** o fim de [`atualizar_app`], nos dois caminhos.
-fn finish(target: &str) {
-    plataforma::ensure_path_setup();
-    plataforma::make_launcher();
+fn finish(ctx: &Ctx, target: &str) {
+    crate::nucleo::lancador::garantir_path(ctx);
+    crate::nucleo::lancador::criar_lancador(ctx);
     let got = versao::installed_app_version().unwrap_or_else(|| target.to_string());
     let dir = plataforma::install_dir().display().to_string();
     println!("✓ {}", tf("up.installed_at", &[("version", &got), ("dir", &dir)]));
-    if let Some(aviso) = crate::nucleo::dica_path::aviso_pos_instalacao(
-        &plataforma::install_dir(),
-        &crate::nucleo::util::home(),
-    ) {
+    if let Some(aviso) =
+        crate::nucleo::dica_path::aviso_pos_instalacao(ctx, &plataforma::install_dir())
+    {
         println!("\n{aviso}");
     }
     limpar_versoes_antigas_do_hub();

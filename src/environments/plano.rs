@@ -113,14 +113,6 @@ where
     Ok(PlanAction::Executed)
 }
 
-/// Executa um passo de verdade (a menos que seja nota/no-op).
-pub(crate) fn exec_step(s: &Step) -> Result<(), String> {
-    if s.source == "nota" {
-        return Ok(());
-    }
-    util::run_shell(&s.cmd)
-}
-
 /// Imprime como USAR a imagem docker recém-baixada (docker run + snippet devcontainer).
 pub(crate) fn print_docker_usage(env: &Env, img: &str) {
     println!("{}", t("env.docker_usage"));

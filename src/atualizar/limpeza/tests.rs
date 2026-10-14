@@ -524,14 +524,9 @@ fn classificar_casa_os_padroes_reais_e_so_eles() {
     assert_eq!(s(".x.bak-", "x"), None);
 }
 
-/// **Windows:** o `.exe` em uso vira `<stem>.old`; a lógica é pura e testada aqui (o rename
-/// em si só roda no Windows). E a janela é reconhecida com ou sem `.exe`.
+/// A janela é reconhecida com ou sem `.exe` (nome como DADO).
 #[test]
-fn logica_do_windows_old_e_janela() {
-    assert_eq!(
-        caminho_old(Path::new("C:/u/.cargo/bin/schematize-overdev.exe")),
-        PathBuf::from("C:/u/.cargo/bin/schematize-overdev.old")
-    );
+fn janela_com_ou_sem_exe() {
     assert!(eh_janela("schematize-overdev-gui"));
     assert!(eh_janela("schematize-overdev-gui.exe"));
     assert!(!eh_janela("schematize-overdev"));

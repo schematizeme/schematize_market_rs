@@ -168,8 +168,14 @@ pub fn caminho_de_instalador_oficial(caminho: &Path) -> bool {
 /// POSITIVAS e baratas: o `mise` diz que gerencia, o docker diz que tem a imagem. Só depois
 /// se vai ao binário no PATH — que é o terreno onde distro e oficial se confundem, e onde a
 /// única resposta honesta vem do dono do arquivo.
-pub fn de(lang: &str, bin: &str, tem_mise: bool, tem_docker: bool) -> Procedencia {
-    if tem_mise && detect::mise_has(defs::mise_tools(lang).last().copied().unwrap_or("")) {
+pub fn de(
+    ctx: &crate::ctx::Ctx,
+    lang: &str,
+    bin: &str,
+    tem_mise: bool,
+    tem_docker: bool,
+) -> Procedencia {
+    if tem_mise && detect::mise_has(ctx, defs::mise_tools(lang).last().copied().unwrap_or("")) {
         return Procedencia::Mise;
     }
     if tem_docker {

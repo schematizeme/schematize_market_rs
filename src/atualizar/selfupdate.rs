@@ -38,6 +38,7 @@
 
 use super::alvo::Metodo;
 use super::binario;
+use crate::ctx::Ctx;
 use crate::nucleo::{plataforma, rede};
 use std::path::{Path, PathBuf};
 
@@ -49,7 +50,11 @@ use std::path::{Path, PathBuf};
 ///
 /// **A ordem:** varre temporários órfãos → tenta o asset pré-compilado → cai para o fonte.
 /// A varredura vem primeiro de propósito: ver [`limpar_orfaos`].
-pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result<(), String> {
+pub fn atualizar_a_si_mesmo(
+    ctx: &Ctx,
+    versao_alvo: Option<&str>,
+    metodo: Metodo,
+) -> Result<(), String> {
     let eu = std::env::current_exe()
         .map_err(|e| format!("não consegui descobrir o caminho deste binário: {e}"))?;
     limpar_orfaos(&eu);
@@ -61,14 +66,14 @@ pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result
 
     if let Some(asset) = plataforma::market_asset_name() {
         println!("→ baixando o binário pré-compilado do market v{alvo}…");
-        match baixar_candidato(&asset, alvo) {
+        match baixar_candidato(ctx, &asset, alvo) {
             Ok(cand) => {
-                let r = trocar_com_rede(&cand, &eu, alvo);
+                let r = trocar_com_rede(ctx, &cand, &eu, alvo);
                 let _ = std::fs::remove_file(&cand);
                 r?;
                 super::metodo::registrar(plataforma::MARKET_REPO, Metodo::Binario);
                 println!("✓ schematize-market atualizado para v{alvo} (binário pré-compilado).");
-                avisar_janela(alvo);
+                avisar_janela(ctx, alvo);
                 return Ok(());
             }
             // D7: quem instalou por binário não cai num build implícito (sudo sem terminal).
@@ -84,7 +89,7 @@ pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result
         println!("→ sem binário pré-compilado do market para esta plataforma — do fonte…");
     }
 
-    compilar_e_trocar(&eu, alvo)
+    compilar_e_trocar(ctx, &eu, alvo)
 }
 
 /// **O quê:** instala a JANELA do market (`schematize-market-gui`) baixando o asset `asset` do
@@ -97,6 +102,7 @@ pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result
 /// mesmo release, nunca chegava a `~/.cargo/bin` — a máquina ficava sem a janela do gestor
 /// mesmo "atualizada".
 pub fn instalar_janela_com<R: super::release::Rede>(
+    ctx: &Ctx,
     rede: &R,
     asset: &str,
     versao: &str,
@@ -115,8 +121,8 @@ pub fn instalar_janela_com<R: super::release::Rede>(
         let _ = std::fs::remove_file(&tmp);
         return Err(format!("o download de {asset} (v{versao}) veio vazio"));
     }
-    binario::make_executable(&tmp);
-    let r = binario::place(&tmp, destino);
+    binario::make_executable(ctx, &tmp);
+    let r = binario::place(ctx, &tmp, destino);
     let _ = std::fs::remove_file(&tmp);
     r
 }
@@ -124,17 +130,18 @@ pub fn instalar_janela_com<R: super::release::Rede>(
 /// **O quê:** instala a janela do market da `versao` publicada em `~/.cargo/bin`. `Err` se esta
 /// plataforma não tem asset ou o download falhar. **Onde:** o self-update, o `update`
 /// ([`super::componentes`]) e o `install --all`.
-pub fn instalar_janela_do_market(versao: &str) -> Result<(), String> {
+pub fn instalar_janela_do_market(ctx: &Ctx, versao: &str) -> Result<(), String> {
     let asset = plataforma::gestor_gui_asset_name()
         .ok_or("esta plataforma não tem a janela do market pré-compilada")?;
     let destino = plataforma::install_dir().join(plataforma::gestor_gui_bin());
-    instalar_janela_com(&super::release::RedeReal, &asset, versao, &destino)
+    instalar_janela_com(ctx, &super::release::RedeReal(ctx), &asset, versao, &destino)
 }
 
 /// **O quê:** garante a janela do market em `destino`: já existe -> `Ok(false)` sem rede;
 /// falta -> baixa a da versão publicada e `Ok(true)`. `publicada` é a última versão (ou a causa
 /// de não saber). **Onde:** [`garantir_janela_do_market`] e a suíte.
 pub fn garantir_janela_com<R: super::release::Rede>(
+    ctx: &Ctx,
     rede: &R,
     asset: &str,
     publicada: Result<&str, &str>,
@@ -144,24 +151,25 @@ pub fn garantir_janela_com<R: super::release::Rede>(
         return Ok(false);
     }
     let v = publicada.map_err(|c| format!("não sei qual versão da janela baixar ({c})"))?;
-    instalar_janela_com(rede, asset, v, destino).map(|()| true)
+    instalar_janela_com(ctx, rede, asset, v, destino).map(|()| true)
 }
 
 /// **O quê:** toda instalação/atualização deixa a `schematize-market-gui` presente. NUNCA falha
 /// quem chama: o problema vira UMA linha de aviso com a causa. **Onde:** `install <qualquer
 /// coisa>` e `update` (`cli/`). Sem efeito em `--dry-run` (quem chama não invoca).
-pub fn garantir_janela_do_market() {
+pub fn garantir_janela_do_market(ctx: &Ctx) {
     let Some(asset) = plataforma::gestor_gui_asset_name() else { return };
     let destino = plataforma::install_dir().join(plataforma::gestor_gui_bin());
     if destino.is_file() {
         return;
     }
-    let publicada = match super::alvo::alvo_de(plataforma::MARKET_REPO) {
+    let publicada = match super::alvo::alvo_de(ctx, plataforma::MARKET_REPO) {
         super::alvo::Alvo::Versao(v) | super::alvo::Alvo::SemAsset { versao: v } => Ok(v),
         super::alvo::Alvo::Indisponivel(e) => Err(e),
     };
     let r = garantir_janela_com(
-        &super::release::RedeReal,
+        ctx,
+        &super::release::RedeReal(ctx),
         &asset,
         publicada.as_deref().map_err(String::as_str),
         &destino,
@@ -176,8 +184,8 @@ pub fn garantir_janela_do_market() {
 /// **O quê:** [`instalar_janela_do_market`] sem derrubar quem chama: o CLI JÁ foi trocado, então
 /// falhar aqui vira aviso DITO com a causa e como repetir (nunca silêncio). **Onde:** o fim do
 /// self-update.
-fn avisar_janela(versao: &str) {
-    match instalar_janela_do_market(versao) {
+fn avisar_janela(ctx: &Ctx, versao: &str) {
+    match instalar_janela_do_market(ctx, versao) {
         Ok(()) => println!("✓ {}", plataforma::gestor_gui_bin()),
         Err(e) => println!(
             "aviso: o schematize-market está atualizado, mas a janela não: {e}\n  \
@@ -193,16 +201,16 @@ fn avisar_janela(versao: &str) {
 /// **Por que ao lado, e não no `/tmp`:** o passo seguinte é um `rename(2)` para o lugar do
 /// binário, e rename entre filesystems falha com `EXDEV`. Em muitas máquinas `/tmp` é um
 /// `tmpfs` — outro filesystem. Baixar já no diretório de destino elimina a classe inteira.
-fn baixar_candidato(asset: &str, alvo: &str) -> Result<PathBuf, String> {
+fn baixar_candidato(ctx: &Ctx, asset: &str, alvo: &str) -> Result<PathBuf, String> {
     let eu = std::env::current_exe().map_err(|e| e.to_string())?;
     let dst = eu.with_file_name(format!("{}.baixado", nome_do_arquivo(&eu)));
     let _ = std::fs::remove_file(&dst);
     let url = rede::url_de_asset(plataforma::MARKET_REPO, &format!("v{alvo}"), asset);
-    if !rede::download(&url, &dst) {
+    if !rede::download(ctx, &url, &dst) {
         let _ = std::fs::remove_file(&dst);
         return Err(format!("download falhou: {url}"));
     }
-    binario::make_executable(&dst);
+    binario::make_executable(ctx, &dst);
     Ok(dst)
 }
 
@@ -211,11 +219,12 @@ fn baixar_candidato(asset: &str, alvo: &str) -> Result<PathBuf, String> {
 ///
 /// Compila para um caminho AO LADO do binário atual — nunca direto por cima —, e só então
 /// entrega a [`trocar_com_rede`], que verifica antes de substituir.
-fn compilar_e_trocar(eu: &Path, alvo: &str) -> Result<(), String> {
-    let cargo = plataforma::ensure_toolchain()?;
+fn compilar_e_trocar(ctx: &Ctx, eu: &Path, alvo: &str) -> Result<(), String> {
+    let cargo = ctx.receitas.garantir_toolchain(ctx.plat)?;
     let cand = eu.with_file_name(format!("{}.compilado", nome_do_arquivo(eu)));
     let _ = std::fs::remove_file(&cand);
     let r = super::fonte::build_one(
+        ctx,
         cargo.to_str().unwrap_or("cargo"),
         plataforma::MARKET_REPO,
         &[],
@@ -223,12 +232,12 @@ fn compilar_e_trocar(eu: &Path, alvo: &str) -> Result<(), String> {
         &plataforma::market_bin_name(),
         &cand,
     )
-    .and_then(|()| trocar_com_rede(&cand, eu, alvo));
+    .and_then(|()| trocar_com_rede(ctx, &cand, eu, alvo));
     let _ = std::fs::remove_file(&cand);
     r?;
     super::metodo::registrar(plataforma::MARKET_REPO, Metodo::Fonte);
     println!("✓ schematize-market atualizado para v{alvo} (compilado do fonte).");
-    avisar_janela(alvo);
+    avisar_janela(ctx, alvo);
     Ok(())
 }
 
@@ -238,85 +247,35 @@ fn compilar_e_trocar(eu: &Path, alvo: &str) -> Result<(), String> {
 /// binário substitui o binário EM EXECUÇÃO.
 ///
 /// **A sequência, e por que ela é esta:**
-/// 1. `candidato` e `destino` no MESMO filesystem — senão o `rename` falha com `EXDEV` e a
-///    troca deixa de ser atômica. A mensagem diz o mount, porque "falhou" não é acionável.
-/// 2. Copia para `<destino>.novo`, no diretório do destino.
-/// 3. **Verifica a CÓPIA** — executa e confere a versão. É aqui que um candidato truncado,
-///    vazio ou sem bit de execução é recusado.
-/// 4. Só então o `rename`. Falhou qualquer passo, o `.novo` é apagado e o antigo continua
-///    valendo, intacto.
+/// 1. Dá bit de execução ao candidato (`plat.substituicao`) — todo download chega sem ele.
+/// 2. **Verifica o candidato** — executa e confere a versão. É aqui que um candidato truncado,
+///    vazio ou inexecutável é recusado, ANTES de qualquer escrita no destino.
+/// 3. Só então a troca, pela costura `plat.substituicao`: grava `<destino>.novo` no diretório
+///    do destino (mesmo filesystem, atômico) e renomeia por cima — no Windows, a costura
+///    aposenta o antigo. Falhou qualquer passo, o antigo continua valendo, intacto.
 ///
-/// **Nunca há um instante em que o destino não existe.** Não há `remove_file` no destino em
-/// lugar nenhum deste caminho: o `rename` substitui em um passo.
-pub fn trocar_com_rede(candidato: &Path, destino: &Path, esperada: &str) -> Result<(), String> {
+/// **Nunca há um instante em que o destino não existe** (Unix): não há `remove_file` no
+/// destino em lugar nenhum deste caminho.
+pub fn trocar_com_rede(
+    ctx: &Ctx,
+    candidato: &Path,
+    destino: &Path,
+    esperada: &str,
+) -> Result<(), String> {
     if !candidato.is_file() {
         return Err(format!("o candidato {} não existe", candidato.display()));
     }
     binario::garante_diretorio_pai(destino)?;
-    let tmp = binario::caminho_temporario(destino);
-    verificar_mesmo_filesystem(&tmp, destino)?;
+    binario::make_executable(ctx, candidato);
 
-    let _ = std::fs::remove_file(&tmp);
-    std::fs::copy(candidato, &tmp)
-        .map_err(|e| format!("não consegui gravar {}: {e}", tmp.display()))?;
-    binario::make_executable(&tmp);
-
-    // A verificação é sobre a CÓPIA. Uma cópia truncada por disco cheio passa por qualquer
-    // checagem feita na origem — e é o binário copiado que vai virar o gestor da máquina.
-    if !binario::executa_e_reporta(&tmp, esperada) {
-        let _ = std::fs::remove_file(&tmp);
+    if !binario::executa_e_reporta(candidato, esperada) {
         return Err(format!(
             "o binário novo não respondeu `--version` com v{esperada} — a troca NÃO foi feita \
              e o {} atual continua valendo",
             nome_do_arquivo(destino)
         ));
     }
-
-    std::fs::rename(&tmp, destino).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("não consegui substituir {}: {e}", destino.display())
-    })
-}
-
-/// **O quê:** os dois caminhos ficam no mesmo filesystem? `Err` com mensagem acionável se não.
-///
-/// **Onde:** [`trocar_com_rede`], antes de qualquer escrita.
-///
-/// **Por que é uma verificação e não uma suposição:** `<destino>.novo` está, por construção,
-/// no diretório do destino — então hoje a resposta é sempre "sim". A verificação existe para
-/// o dia em que alguém mudar [`binario::caminho_temporario`] para um `/tmp` "mais limpo": aí
-/// o `rename` passa a falhar com `EXDEV` e a troca deixa de ser atômica, silenciosamente, num
-/// caminho que só roda em máquina de usuário.
-///
-/// No Windows a checagem é pulada: lá o `rename` sobre arquivo em uso não funciona de todo
-/// jeito, e [`binario::substitui_binario`] usa a estratégia do `.old`.
-fn verificar_mesmo_filesystem(a: &Path, b: &Path) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        // Compara o diretório de cada um: o próprio arquivo pode ainda não existir.
-        let dev = |p: &Path| -> Option<u64> {
-            let d = p.parent()?;
-            std::fs::metadata(d).ok().map(|m| m.dev())
-        };
-        match (dev(a), dev(b)) {
-            (Some(x), Some(y)) if x != y => Err(format!(
-                "o temporário ({}) e o destino ({}) estão em sistemas de arquivos diferentes — \
-                 a troca não seria atômica. Mova o temporário para o mesmo diretório do \
-                 destino, ou monte os dois no mesmo filesystem.",
-                a.display(),
-                b.display()
-            )),
-            // Não conseguir ler o `dev` de um deles não é motivo para recusar: o `rename`
-            // dirá. Recusar aqui bloquearia a atualização por causa de um `stat` que falhou.
-            _ => Ok(()),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (a, b);
-        Ok(())
-    }
+    ctx.plat.substituicao.substituir(candidato, destino)
 }
 
 /// **O quê:** apaga temporários órfãos deixados por uma tentativa anterior.
@@ -351,7 +310,6 @@ fn nome_do_arquivo(p: &Path) -> String {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::nucleo::util;
 
     /// Sandbox com um "binário" velho que funciona, no papel do market em execução.
     fn sandbox(nome: &str) -> (PathBuf, PathBuf) {
@@ -360,7 +318,7 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let velho = d.join("schematize-market");
         std::fs::write(&velho, "#!/bin/sh\necho \"schematize-market 1.0.0\"\n").unwrap();
-        binario::make_executable(&velho);
+        binario::make_executable(&Ctx::de_teste(), &velho);
         (d, velho)
     }
 
@@ -377,9 +335,10 @@ mod tests {
         let (d, velho) = sandbox("bom");
         let cand = d.join("candidato");
         std::fs::write(&cand, "#!/bin/sh\necho \"schematize-market 2.0.0\"\n").unwrap();
-        binario::make_executable(&cand);
+        binario::make_executable(&Ctx::de_teste(), &cand);
 
-        trocar_com_rede(&cand, &velho, "2.0.0").expect("o candidato bom tinha de passar");
+        trocar_com_rede(&Ctx::de_teste(), &cand, &velho, "2.0.0")
+            .expect("o candidato bom tinha de passar");
 
         assert!(binario::executa_e_reporta(&velho, "2.0.0"), "o novo não ficou no lugar");
         assert!(!binario::caminho_temporario(&velho).exists(), "sobrou o `.novo`");
@@ -393,9 +352,9 @@ mod tests {
         let (d, velho) = sandbox("versao");
         let cand = d.join("candidato");
         std::fs::write(&cand, "#!/bin/sh\necho \"schematize-market 0.0.1\"\n").unwrap();
-        binario::make_executable(&cand);
+        binario::make_executable(&Ctx::de_teste(), &cand);
 
-        let e = trocar_com_rede(&cand, &velho, "2.0.0").unwrap_err();
+        let e = trocar_com_rede(&Ctx::de_teste(), &cand, &velho, "2.0.0").unwrap_err();
         assert!(e.contains("2.0.0"), "a mensagem tem de dizer o que se esperava: {e}");
         assert!(e.contains("continua valendo"), "e que nada foi quebrado: {e}");
         assert!(velho_intacto(&velho), "o binário velho tinha de sobreviver");
@@ -423,9 +382,9 @@ mod tests {
             let (d, velho) = sandbox(nome);
             let cand = d.join("candidato");
             std::fs::write(&cand, conteudo).unwrap();
-            binario::make_executable(&cand);
+            binario::make_executable(&Ctx::de_teste(), &cand);
 
-            let r = trocar_com_rede(&cand, &velho, "2.0.0");
+            let r = trocar_com_rede(&Ctx::de_teste(), &cand, &velho, "2.0.0");
             assert!(r.is_err(), "caso `{nome}`: a troca NÃO podia ter acontecido");
             assert!(
                 velho_intacto(&velho),
@@ -456,9 +415,10 @@ mod tests {
         let (d, velho) = sandbox("sem-permissao");
         let cand = d.join("candidato");
         std::fs::write(&cand, "#!/bin/sh\necho \"schematize-market 2.0.0\"\n").unwrap();
-        util::definir_modo(&cand, 0o644); // como todo arquivo recém-baixado
+        std::fs::set_permissions(&cand, std::os::unix::fs::PermissionsExt::from_mode(0o644))
+            .unwrap(); // como todo arquivo recém-baixado
 
-        trocar_com_rede(&cand, &velho, "2.0.0")
+        trocar_com_rede(&Ctx::de_teste(), &cand, &velho, "2.0.0")
             .expect("um candidato bom sem o bit tinha de ser corrigido, não recusado");
         assert!(binario::executa_e_reporta(&velho, "2.0.0"), "a troca não aconteceu");
         assert!(!binario::caminho_temporario(&velho).exists());
@@ -469,45 +429,10 @@ mod tests {
     #[test]
     fn candidato_inexistente_e_recusado_sem_escrever_nada() {
         let (d, velho) = sandbox("ausente");
-        let r = trocar_com_rede(&d.join("nao-existe"), &velho, "2.0.0");
+        let r = trocar_com_rede(&Ctx::de_teste(), &d.join("nao-existe"), &velho, "2.0.0");
         assert!(r.is_err());
         assert!(velho_intacto(&velho));
         assert!(!binario::caminho_temporario(&velho).exists());
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// **A camada 1:** o temporário fica no diretório do DESTINO, e a checagem de filesystem
-    /// concorda. Se alguém mudar `caminho_temporario` para o `/tmp`, este teste é quem avisa —
-    /// antes de o `EXDEV` aparecer na máquina de um usuário.
-    #[test]
-    fn o_temporario_e_o_destino_ficam_no_mesmo_filesystem() {
-        let (d, velho) = sandbox("fs");
-        let tmp = binario::caminho_temporario(&velho);
-        assert_eq!(tmp.parent(), velho.parent(), "o `.novo` saiu do diretório do destino");
-        verificar_mesmo_filesystem(&tmp, &velho).expect("mesmo diretório é o mesmo filesystem");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// E a checagem RECUSA, com mensagem acionável, quando de fato são mounts diferentes.
-    ///
-    /// `/proc` é um filesystem próprio em todo Linux — serve de segundo mount sem precisar de
-    /// privilégio. Onde ele não existir (macOS), o teste não tem o que afirmar e sai.
-    #[test]
-    fn filesystems_diferentes_dao_erro_acionavel() {
-        use std::os::unix::fs::MetadataExt;
-        let (d, velho) = sandbox("exdev");
-        let outro = Path::new("/proc/self/x");
-        let (Ok(a), Ok(b)) = (std::fs::metadata(&d), std::fs::metadata("/proc")) else {
-            let _ = std::fs::remove_dir_all(&d);
-            return;
-        };
-        if a.dev() == b.dev() {
-            let _ = std::fs::remove_dir_all(&d);
-            return; // sem dois mounts distintos, não há o que provar aqui
-        }
-        let e = verificar_mesmo_filesystem(outro, &velho).unwrap_err();
-        assert!(e.contains("sistemas de arquivos diferentes"), "{e}");
-        assert!(e.contains("mesmo diretório"), "a mensagem tem de dizer o que fazer: {e}");
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -558,7 +483,14 @@ mod tests {
         let (d, _) = sandbox("janela-ok");
         let dst = d.join("schematize-market-gui");
         let r = RedeJanela { entrega: true, corpo: b"janela", pediu: Default::default() };
-        instalar_janela_com(&r, "schematize-market-gui-linux-x86_64", "0.4.5", &dst).unwrap();
+        instalar_janela_com(
+            &Ctx::de_teste(),
+            &r,
+            "schematize-market-gui-linux-x86_64",
+            "0.4.5",
+            &dst,
+        )
+        .unwrap();
         assert_eq!(std::fs::read(&dst).unwrap(), b"janela");
         let url = r.pediu.borrow()[0].clone();
         assert!(url.ends_with("/v0.4.5/schematize-market-gui-linux-x86_64"), "{url}");
@@ -575,8 +507,14 @@ mod tests {
             let dst = d.join("schematize-market-gui");
             std::fs::write(&dst, b"antiga").unwrap();
             let r = RedeJanela { entrega, corpo, pediu: Default::default() };
-            let e = instalar_janela_com(&r, "schematize-market-gui-linux-x86_64", "0.4.5", &dst)
-                .unwrap_err();
+            let e = instalar_janela_com(
+                &Ctx::de_teste(),
+                &r,
+                "schematize-market-gui-linux-x86_64",
+                "0.4.5",
+                &dst,
+            )
+            .unwrap_err();
             assert!(e.contains("schematize-market-gui-linux-x86_64"), "{e}");
             assert_eq!(std::fs::read(&dst).unwrap(), b"antiga");
             let _ = std::fs::remove_dir_all(&d);
@@ -591,15 +529,15 @@ mod tests {
         let dst = d.join("schematize-market-gui");
         let r = RedeJanela { entrega: true, corpo: b"j", pediu: Default::default() };
         let a = "schematize-market-gui-linux-x86_64";
-        assert_eq!(garantir_janela_com(&r, a, Ok("0.4.6"), &dst), Ok(true));
+        assert_eq!(garantir_janela_com(&Ctx::de_teste(), &r, a, Ok("0.4.6"), &dst), Ok(true));
         assert!(dst.is_file());
-        assert_eq!(garantir_janela_com(&r, a, Ok("0.4.6"), &dst), Ok(false));
+        assert_eq!(garantir_janela_com(&Ctx::de_teste(), &r, a, Ok("0.4.6"), &dst), Ok(false));
         assert_eq!(r.pediu.borrow().len(), 1, "2ª vez não baixa");
         std::fs::remove_file(&dst).unwrap();
-        let e = garantir_janela_com(&r, a, Err("sem rede"), &dst).unwrap_err();
+        let e = garantir_janela_com(&Ctx::de_teste(), &r, a, Err("sem rede"), &dst).unwrap_err();
         assert!(e.contains("sem rede"), "{e}");
         let ruim = RedeJanela { entrega: false, corpo: b"", pediu: Default::default() };
-        assert!(garantir_janela_com(&ruim, a, Ok("0.4.6"), &dst).is_err());
+        assert!(garantir_janela_com(&Ctx::de_teste(), &ruim, a, Ok("0.4.6"), &dst).is_err());
         let _ = std::fs::remove_dir_all(&d);
     }
 
@@ -608,8 +546,8 @@ mod tests {
     fn install_e_update_chamam_garantir_janela() {
         let i = include_str!("../cli/instalar.rs");
         let i = i.split("#[cfg(test)]").next().unwrap();
-        assert!(i.contains("garantir_janela_do_market()"));
+        assert!(i.contains("garantir_janela_do_market(ctx)"));
         let u = include_str!("../cli/atualizar.rs");
-        assert!(u.contains("garantir_janela_do_market()"));
+        assert!(u.contains("garantir_janela_do_market(ctx)"));
     }
 }

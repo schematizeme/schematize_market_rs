@@ -9,17 +9,19 @@
 //! terminaria num "não conheço a linguagem schematize-deployer" — verdade técnica e resposta
 //! inútil.
 
-use market::appsdacasa::{externo, instalar_app_da_casa, registrar_no_menu, EXTERNOS};
-use market::atualizar::instalacao::Resultado;
-use market::atualizar::kit::{self, AcaoMarket, Desfecho};
-use market::atualizar::selfupdate;
-use market::environments::{self, DesfechoFerramenta};
-use market::nucleo::i18n::{t, tf};
+use crate::appsdacasa::{externo, instalar_app_da_casa, registrar_no_menu, EXTERNOS};
+use crate::atualizar::instalacao::Resultado;
+use crate::atualizar::kit::{self, AcaoMarket, Desfecho};
+use crate::atualizar::selfupdate;
+use crate::ctx::Ctx;
+use crate::environments::{self, DesfechoFerramenta};
+use crate::nucleo::i18n::{t, tf};
 
 /// **O quê:** instala um app da casa, uma linguagem ou uma ferramenta de dev — ou, com
 /// `--all`, todos os apps do ecossistema.
 /// **Onde:** `schematize-market install <what>` / `install --all`.
 pub(crate) fn install_cmd(
+    ctx: &Ctx,
     what: Option<&str>,
     all: bool,
     method: Option<String>,
@@ -27,14 +29,14 @@ pub(crate) fn install_cmd(
     yes: bool,
 ) -> Result<(), String> {
     let r = match (what, all) {
-        (_, true) => instalar_todos(dry_run, yes),
-        (Some(w), false) if externo(w).is_some() => instalar_app(w, dry_run, yes).map(|_| ()),
-        (Some(w), false) => environments::install(w, method, dry_run, yes),
+        (_, true) => instalar_todos(ctx, dry_run, yes),
+        (Some(w), false) if externo(w).is_some() => instalar_app(ctx, w, dry_run, yes).map(|_| ()),
+        (Some(w), false) => environments::install(ctx, w, method, dry_run, yes),
         (None, false) => Err(t("install.what_missing")),
     };
     // O market com janela vem com QUALQUER coisa instalada; falhar aqui só avisa (uma linha).
     if r.is_ok() && !dry_run && !all {
-        selfupdate::garantir_janela_do_market();
+        selfupdate::garantir_janela_do_market(ctx);
     }
     r
 }
@@ -56,7 +58,7 @@ const FERRAMENTAS_DO_KIT: [&str; 3] = ["claude", "codex", "cursor"];
 /// falhou, o erro (exit != 0) com o que fazer.
 ///
 /// **Onde:** [`install_cmd`] com `--all` — o que a dica do `update` numa máquina limpa manda rodar.
-fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
+fn instalar_todos(ctx: &Ctx, dry_run: bool, yes: bool) -> Result<(), String> {
     let mut nomes = conjunto_completo();
     nomes.extend(FERRAMENTAS_DO_KIT);
     nomes.push(MARKET);
@@ -70,14 +72,14 @@ fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
     }
     let mut itens: Vec<(String, Desfecho)> = Vec::new();
     for n in conjunto_completo() {
-        let d = instalar_app(n, dry_run, true).unwrap_or_else(|e| {
+        let d = instalar_app(ctx, n, dry_run, true).unwrap_or_else(|e| {
             eprintln!("{}", tf("install.all_error", &[("app", n), ("error", &e)]));
             Desfecho::Falhou(e)
         });
         itens.push((n.to_string(), d));
     }
     for slug in FERRAMENTAS_DO_KIT {
-        let d = match environments::instalar_ferramenta_no_kit(slug, dry_run) {
+        let d = match environments::instalar_ferramenta_no_kit(ctx, slug, dry_run) {
             Ok(DesfechoFerramenta::Instalada) => Desfecho::Instalado,
             Ok(DesfechoFerramenta::JaInstalada) => Desfecho::EmDia,
             Ok(DesfechoFerramenta::NadaFeito) => Desfecho::NadaFeito,
@@ -92,7 +94,7 @@ fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
         };
         itens.push((slug.to_string(), d));
     }
-    let d = instalar_market(dry_run).unwrap_or_else(|e| {
+    let d = instalar_market(ctx, dry_run).unwrap_or_else(|e| {
         eprintln!("{}", tf("install.all_error", &[("app", MARKET), ("error", &e)]));
         Desfecho::Falhou(e)
     });
@@ -107,13 +109,13 @@ const MARKET: &str = "schematize-market";
 /// **O quê:** mantém o PRÓPRIO market e a janela dele no `install --all`: self-update se há
 /// versão nova (que já traz a janela), ou só a janela quando o CLI está em dia e ela falta.
 /// **Onde:** [`instalar_todos`], depois dos apps.
-fn instalar_market(dry_run: bool) -> Result<Desfecho, String> {
-    use market::atualizar::{alvo, APPS_GERIDOS};
+fn instalar_market(ctx: &Ctx, dry_run: bool) -> Result<Desfecho, String> {
+    use crate::atualizar::{alvo, APPS_GERIDOS};
     let app = APPS_GERIDOS
         .iter()
         .find(|a| a.bin == MARKET)
         .ok_or("o market não está na tabela de apps geridos")?;
-    let publicada = match alvo::alvo_de(app.repo) {
+    let publicada = match alvo::alvo_de(ctx, app.repo) {
         alvo::Alvo::Versao(v) | alvo::Alvo::SemAsset { versao: v } => Ok(v),
         alvo::Alvo::Indisponivel(e) => Err(e),
     };
@@ -138,12 +140,12 @@ fn instalar_market(dry_run: bool) -> Result<Desfecho, String> {
         )),
         _ if dry_run => Ok(Desfecho::NadaFeito),
         AcaoMarket::AtualizarCli(v) => {
-            selfupdate::atualizar_a_si_mesmo(Some(&v), alvo::metodo_de(app.repo))?;
+            selfupdate::atualizar_a_si_mesmo(ctx, Some(&v), alvo::metodo_de(app.repo))?;
             Ok(Desfecho::Atualizado)
         }
         AcaoMarket::SoJanela(v) => {
-            selfupdate::instalar_janela_do_market(&v)?;
-            println!("✓ {}", market::nucleo::plataforma::gestor_gui_bin());
+            selfupdate::instalar_janela_do_market(ctx, &v)?;
+            println!("✓ {}", crate::nucleo::plataforma::gestor_gui_bin());
             Ok(Desfecho::Instalado)
         }
     }
@@ -156,6 +158,7 @@ fn instalar_market(dry_run: bool) -> Result<Desfecho, String> {
 /// binário daqui deixaria o ícone órfão no menu — e um ícone que abre nada é pior que um app
 /// instalado.
 pub(crate) fn remove_cmd(
+    ctx: &Ctx,
     what: &str,
     method: Option<String>,
     dry_run: bool,
@@ -167,7 +170,7 @@ pub(crate) fn remove_cmd(
             a.bin, a.bin
         ));
     }
-    environments::remove(what, method, dry_run, yes)
+    environments::remove(ctx, what, method, dry_run, yes)
 }
 
 /// **O quê:** instala um app externo — binário pronto do release; compila só se não houver —,
@@ -178,7 +181,7 @@ pub(crate) fn remove_cmd(
 /// **O que mudou no ADR-0013:** isto executava `curl -fsSL <install.sh> | bash -s -- --flag`.
 /// Agora o market instala ele mesmo ([`crate::appsdacasa::instalar_app_da_casa`]): release primeiro, fonte só sem binário — e porque o
 /// `install.sh` passou a delegar para cá: manter o `curl` faria os dois se chamarem em círculo.
-fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<Desfecho, String> {
+fn instalar_app(ctx: &Ctx, nome: &str, dry_run: bool, yes: bool) -> Result<Desfecho, String> {
     // Deny-by-default: só o que está na tabela. Nome desconhecido não vira alvo de build.
     let Some(a) = externo(nome) else {
         let nomes: Vec<&str> = EXTERNOS.iter().map(|x| x.bin).collect();
@@ -203,8 +206,8 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<Desfecho, String
             }
         }
     };
-    let existia = market::atualizar::APPS_GERIDOS.iter().any(|x| x.bin == a.bin && x.instalado());
-    let resultado = instalar_app_da_casa(a.bin, dry_run, banner)?;
+    let existia = crate::atualizar::APPS_GERIDOS.iter().any(|x| x.bin == a.bin && x.instalado());
+    let resultado = instalar_app_da_casa(ctx, a.bin, dry_run, banner)?;
     // Sem terminal e sem `-y`: não é cancelamento da pessoa, é falta de como perguntar.
     if let Some(m) = sem_terminal.take() {
         return Err(m);
@@ -228,14 +231,12 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<Desfecho, String
     // Veredito pelo ESTADO, não pelo código de saída: um build que termina 0 sem produzir um
     // binário que responde não instalou nada, e dizer "pronto" ali seria mentir. Olha a cópia
     // CANÔNICA — o PATH ainda pode apontar para outra até o próximo shell.
-    let canonico = market::atualizar::APPS_GERIDOS.iter().find(|x| x.bin == a.bin);
+    let canonico = crate::atualizar::APPS_GERIDOS.iter().find(|x| x.bin == a.bin);
     match canonico.and_then(|x| x.versao_instalada()) {
         Some(versao) => {
             println!("\n✓ {} {versao} instalado.", a.bin);
-            let dir = market::nucleo::plataforma::install_dir();
-            if let Some(aviso) =
-                market::nucleo::dica_path::aviso_pos_instalacao(&dir, &market::util::home())
-            {
+            let dir = crate::nucleo::plataforma::install_dir();
+            if let Some(aviso) = crate::nucleo::dica_path::aviso_pos_instalacao(ctx, &dir) {
                 println!("\n{aviso}");
             }
         }
@@ -258,7 +259,7 @@ mod tests {
     /// linguagem NÃO. Testado pela borda que não toca rede — `remove`, que recusa app.
     #[test]
     fn remove_recusa_app_da_casa_e_diz_por_onde() {
-        let e = remove_cmd("schematize-deployer", None, true, false).unwrap_err();
+        let e = remove_cmd(&Ctx::de_teste(), "schematize-deployer", None, true, false).unwrap_err();
         assert!(e.contains("schematize-deployer uninstall"), "{e}");
     }
 
@@ -285,14 +286,14 @@ mod tests {
     /// Sem alvo e sem `--all` é erro acionável, não pânico nem no-op.
     #[test]
     fn sem_alvo_e_sem_all_diz_o_que_fazer() {
-        let e = install_cmd(None, false, None, true, true).unwrap_err();
+        let e = install_cmd(&Ctx::de_teste(), None, false, None, true, true).unwrap_err();
         assert!(e.contains("--all"), "{e}");
     }
 
     /// Nome fora da tabela não vira flag para um script com sudo.
     #[test]
     fn nome_desconhecido_nao_vira_flag() {
-        let e = instalar_app("--rm-rf", false, true).unwrap_err();
+        let e = instalar_app(&Ctx::de_teste(), "--rm-rf", false, true).unwrap_err();
         assert!(e.contains("não conheço o app"), "{e}");
     }
 }

@@ -84,21 +84,18 @@ pub enum Os {
 
 /// **O quê:** o SO em que este binário está rodando. **Onde:** todo caminho cross-OS daqui.
 pub fn os() -> Os {
-    #[cfg(target_os = "windows")]
-    {
-        Os::Windows
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Os::Mac
-    }
-    #[cfg(target_os = "freebsd")]
-    {
-        Os::FreeBsd
-    }
-    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "freebsd")))]
-    {
-        Os::Linux
+    os_de(std::env::consts::OS)
+}
+
+/// **O quê:** o [`Os`] de um `std::env::consts::OS` (`"windows"`, `"macos"`, `"freebsd"`; o
+/// resto é Linux). Função PURA — o SO entra como dado, nada de `cfg`.
+/// **Onde:** [`os`] e os testes.
+pub fn os_de(consts_os: &str) -> Os {
+    match consts_os {
+        "windows" => Os::Windows,
+        "macos" => Os::Mac,
+        "freebsd" => Os::FreeBsd,
+        _ => Os::Linux,
     }
 }
 
@@ -342,139 +339,6 @@ pub fn tem_sqlite_do_sistema() -> bool {
     util::capture("pkg-config", &["--exists", "sqlite3"]).is_some()
 }
 
-/// Linha de export que o market acrescenta aos `rc` de shell.
-pub(crate) const LINHA_PATH: &str =
-    "\n# schematize-market: ~/.cargo/bin no PATH\nexport PATH=\"$HOME/.cargo/bin:$PATH\"\n";
-
-/// **O quê:** acrescenta [`LINHA_PATH`] a UM arquivo `rc`, sem nunca reescrevê-lo por inteiro.
-/// `Ok(true)` se acrescentou, `Ok(false)` se a linha já estava lá, `Err` se o arquivo existe
-/// mas não pôde ser lido — e nesse caso **não escreve nada**.
-///
-/// **Onde:** [`ensure_path_setup`], uma vez por `rc` (`.bashrc`, `.profile`, `.zshrc`).
-///
-/// **Por que é uma função e não um trecho dentro do `#[cfg(not(windows))]`:** código dentro de
-/// `cfg` de plataforma não compila nas outras, e portanto nenhum teste da máquina de quem
-/// desenvolve o alcança. `cfg` deve escolher DADOS, não esconder LÓGICA.
-///
-/// **Por que `append` e não ler-modificar-escrever:** o que estava aqui era
-/// `read_to_string(&p).unwrap_or_default()` seguido de `fs::write(&p, novo)`. Toda falha de
-/// leitura virava "arquivo vazio", e o `.bashrc` da pessoa era reescrito contendo SÓ a linha
-/// de export. `read_to_string` falha com `InvalidData` em qualquer arquivo que não seja UTF-8
-/// válido — um comentário acentuado em Latin-1 num `.bashrc` é situação corriqueira, e bastava
-/// isso para destruir anos de configuração. Em modo `append` não há como truncar: o pior caso
-/// é uma linha duplicada.
-pub(crate) fn acrescenta_path_no_rc(p: &std::path::Path) -> Result<bool, String> {
-    match std::fs::read_to_string(p) {
-        Ok(cur) if cur.contains(".cargo/bin") => return Ok(false),
-        Ok(_) => {}
-        // Não existir é normal: o `create(true)` do append cria.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => {
-            return Err(format!("{}: não deu pra ler ({e}); deixei o arquivo intacto", p.display()))
-        }
-    }
-    std::fs::OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open(p)
-        .and_then(|mut f| std::io::Write::write_all(&mut f, LINHA_PATH.as_bytes()))
-        .map(|_| true)
-        .map_err(|e| format!("{}: {e}", p.display()))
-}
-
-/// **O quê:** garante que [`install_dir`] esteja no PATH, para o app rodar do terminal.
-/// Unix: acrescenta o export nos `rc` (idempotente). Windows: PATH perene do usuário.
-/// **Onde:** o fim de toda instalação.
-pub fn ensure_path_setup() {
-    #[cfg(not(windows))]
-    {
-        for rc in [".bashrc", ".profile", ".zshrc"] {
-            // Erro nunca engolido (piso 4): o usuário precisa saber que o PATH não pegou,
-            // senão o sintoma vira "instalei e o comando não existe".
-            if let Err(e) = acrescenta_path_no_rc(&util::home().join(rc)) {
-                eprintln!("aviso: {e}. Acrescente manualmente:{LINHA_PATH}");
-            }
-        }
-    }
-    #[cfg(windows)]
-    {
-        let dir_s = install_dir().to_string_lossy().to_string();
-        // Só adiciona se ainda não estiver no PATH do usuário (evita duplicar).
-        let cur = util::capture(
-            "powershell",
-            &["-NoProfile", "-Command", "[Environment]::GetEnvironmentVariable('Path','User')"],
-        )
-        .unwrap_or_default();
-        if !cur.to_lowercase().contains(&dir_s.to_lowercase()) {
-            let ps = format!(
-                "[Environment]::SetEnvironmentVariable('Path', ([Environment]::GetEnvironmentVariable('Path','User') + ';{dir_s}'), 'User')"
-            );
-            let _ = util::run_inherit("powershell", &["-NoProfile", "-Command", &ps]);
-        }
-    }
-}
-
-/// **O quê:** cria o lançador da GUI do hub (best-effort).
-///
-/// **Onde:** o fim de toda instalação do app.
-///
-/// Linux: `.desktop` com `Exec` ABSOLUTO — o bug do lançador que abria o binário errado do
-/// PATH do ambiente gráfico. Mac/Windows: por ora só garante o binário no PATH.
-pub fn make_launcher() {
-    // Freedesktop (.desktop) vale no Linux e no FreeBSD; Mac/Windows têm outro mecanismo.
-    if !matches!(os(), Os::Linux | Os::FreeBsd) {
-        return;
-    }
-    let (cli, gui) = bin_names();
-    let guibin = install_dir().join(&gui);
-    if !guibin.is_file() {
-        return;
-    }
-    let apps = util::home().join(".local/share/applications");
-    // Lançador é best-effort (não derruba a instalação), mas a falha é DITA, nunca engolida.
-    if let Err(e) = std::fs::create_dir_all(&apps) {
-        eprintln!("aviso: não consegui criar {}: {e}", apps.display());
-        return;
-    }
-
-    // Gera o ícone em TODOS os tamanhos A PARTIR DO CÓDIGO (via o CLI `schematize icon`), para
-    // o `Icon=` abaixo resolver. RESILIENTE: `make_launcher` roda em TODO update; antes ele
-    // regravava o `.desktop` SEM `Icon=` e o dock (Wayland) perdia o ícone. Best-effort.
-    let icons_dir = util::home().join(".local/share/icons/hicolor");
-    let szbin = install_dir().join(&cli);
-    let icon_png = icons_dir.join("256x256").join("apps").join("schematize.png");
-    let _ = util::capture(
-        szbin.to_str().unwrap_or("schematize"),
-        &["icon", "--hicolor", icons_dir.to_str().unwrap_or_default()],
-    );
-    // `Icon=` com caminho ABSOLUTO do 256px (à prova de cache/tema); se o png não saiu, cai
-    // para o nome.
-    let icon =
-        if icon_png.is_file() { icon_png.display().to_string() } else { "schematize".to_string() };
-    // O lançador é o do nome canônico, e o `StartupWMClass` bate com o app_id que o binário
-    // anuncia (a GUI o deriva do próprio nome) — senão o dock não casa a janela com o ícone.
-    let desktop = format!(
-        "[Desktop Entry]\nType=Application\nName=schematize\nGenericName=Skills, overdev e mais\n\
-         Comment=Skills, overdev e mais — schematize\nExec={}\nIcon={icon}\nTerminal=false\n\
-         Categories=Development;Utility;\nKeywords=schematize;skills;overdev;claude;\n\
-         StartupWMClass={}\n",
-        guibin.display(),
-        gui
-    );
-    if let Err(e) = std::fs::write(apps.join("schematize-gui.desktop"), desktop) {
-        eprintln!("aviso: não consegui gravar o lançador em {}: {e}", apps.display());
-    }
-    // Um app, uma entrada no menu. O lançador do INTERREGNO (nome Overflow) que NÓS escrevemos
-    // sai — senão sobram duas entradas e o usuário não sabe qual abrir. Só o do dir do
-    // usuário: o de `/usr/share` é do pacote, não é nosso.
-    let _ = std::fs::remove_file(apps.join("overflow-gui.desktop"));
-    let _ = util::run_inherit("update-desktop-database", &[apps.to_str().unwrap_or_default()]);
-    let _ = util::capture(
-        "gtk-update-icon-cache",
-        &["-f", "-t", icons_dir.to_str().unwrap_or_default()],
-    );
-}
-
 /// **O quê:** executa a GUI instalada pelo caminho absoluto (não depende do PATH do ambiente
 /// gráfico). **Onde:** `schematize-market run`.
 pub fn launch_app() -> Result<(), String> {
@@ -595,7 +459,9 @@ mod tests {
             ("freebsd-x86_64", ""),
             ("macos-arm64", ""),
             ("macos-x86_64", ""),
-            ("windows-x86_64", ".exe"),
+            // Windows NÃO está mais na matriz deste repo: os `.exe` saem do
+            // `schematize_windows_rs` (ADR-0026). A tabela `alvo_de_asset_para` mantém o nome
+            // como DADO, para quem roteia o update no Windows.
         ]
         .iter()
         .flat_map(|(alvo, sfx)| {
@@ -672,70 +538,5 @@ mod tests {
         // gerenciador errado é pior que dizer "não reconheci, instale estas libs".
         assert_eq!(classificar_os_release("ID=plan9\n"), LinuxFam::Unknown);
         assert_eq!(classificar_os_release(""), LinuxFam::Unknown);
-    }
-}
-
-#[cfg(test)]
-mod tests_rc {
-    use super::*;
-
-    /// Sandbox exclusivo deste processo.
-    fn sandbox(nome: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("market-rc-{nome}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
-    /// **O caso que apagava o `.bashrc`.** Um rc em Latin-1 não é UTF-8 válido; a versão
-    /// anterior mapeava a falha de leitura para `""` e reescrevia o arquivo a partir daí.
-    #[test]
-    fn rc_ilegivel_fica_intacto() {
-        let d = sandbox("latin1");
-        let p = d.join(".bashrc");
-        let original = b"# ambiente de anos, configura\xE7\xE3o\nalias ll='ls -la'\n";
-        std::fs::write(&p, original).unwrap();
-
-        let r = acrescenta_path_no_rc(&p);
-        assert!(r.is_err(), "rc ilegível tinha que dar erro, deu {r:?}");
-        assert_eq!(std::fs::read(&p).unwrap(), original, "o .bashrc do usuário foi alterado");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// Rc normal: acrescenta ao FIM, preserva o que havia, e não repete na 2ª chamada.
-    #[test]
-    fn rc_normal_acrescenta_uma_vez_so() {
-        let d = sandbox("ok");
-        let p = d.join(".bashrc");
-        std::fs::write(&p, "alias ll='ls -la'\n").unwrap();
-
-        assert!(acrescenta_path_no_rc(&p).unwrap(), "devia ter acrescentado");
-        let uma = std::fs::read_to_string(&p).unwrap();
-        assert!(uma.starts_with("alias ll='ls -la'\n"), "apagou o conteúdo anterior: {uma}");
-        assert!(uma.contains(".cargo/bin"), "não acrescentou: {uma}");
-
-        assert!(!acrescenta_path_no_rc(&p).unwrap(), "repetiu a linha");
-        assert_eq!(std::fs::read_to_string(&p).unwrap(), uma, "a 2ª chamada mexeu no arquivo");
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// Rc ausente é criado — quem não tem `.zshrc` é a maioria.
-    #[test]
-    fn rc_ausente_e_criado() {
-        let d = sandbox("ausente");
-        let p = d.join(".zshrc");
-        assert!(acrescenta_path_no_rc(&p).unwrap(), "devia ter criado");
-        assert!(std::fs::read_to_string(&p).unwrap().contains(".cargo/bin"));
-        let _ = std::fs::remove_dir_all(&d);
-    }
-
-    /// Diretório no lugar do rc é erro, nunca escrita.
-    #[test]
-    fn diretorio_no_lugar_do_rc_e_erro() {
-        let d = sandbox("dir");
-        let p = d.join(".bashrc");
-        std::fs::create_dir_all(&p).unwrap();
-        assert!(acrescenta_path_no_rc(&p).is_err(), "diretório tinha que falhar");
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

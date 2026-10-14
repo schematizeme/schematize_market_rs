@@ -452,8 +452,8 @@ fn official_install(env: &Env) -> Recipe {
             steps.push(step(
                 &format!(
                     "{} | sh -s -- -y",
-                    crate::nucleo::rede::baixar_para_pipe(
-                        crate::nucleo::rede::cliente(),
+                    crate::receitas_unix::baixar_para_pipe(
+                        schematize_plataforma::seams::rede::cliente(),
                         "https://sh.rustup.rs"
                     )
                 ),

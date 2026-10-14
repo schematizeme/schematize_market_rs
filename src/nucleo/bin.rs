@@ -22,18 +22,7 @@
 //! **Se divergir, o certo é este lado:** o `resolve_bin` do schematize existe para achar o
 //! `claude`; aqui ele existe para achar o `ssh`, que é o caminho quente do produto.
 
-use std::path::{Path, PathBuf};
-
-/// Emuladores de terminal tentados, em ordem de preferência.
-const TERMINAIS: [&str; 7] = [
-    "konsole",
-    "gnome-terminal",
-    "xfce4-terminal",
-    "x-terminal-emulator",
-    "alacritty",
-    "kitty",
-    "xterm",
-];
+use std::path::PathBuf;
 
 /// **O quê:** diretórios onde ferramenta de usuário cai, mas que o `$PATH` de um processo
 /// aberto pelo LANÇADOR DO DESKTOP não inclui — o desktop não lê `~/.profile`/`~/.bashrc`.
@@ -44,21 +33,6 @@ fn fallback_bin_dirs() -> Vec<PathBuf> {
     // certa mora num lugar só.
     let h = super::util::home();
     let mut dirs = vec![h.join(".local/bin"), h.join(".claude/local"), h.join(".cargo/bin")];
-    #[cfg(windows)]
-    {
-        // O OpenSSH do Windows vem aqui desde o Windows 10 1803, e NÃO está no PATH de todo
-        // perfil — sem este fallback, o `vps exec` falha em máquina recém-instalada.
-        if let Some(sysroot) = std::env::var_os("SystemRoot") {
-            let sr = PathBuf::from(sysroot);
-            dirs.push(sr.join("System32").join("OpenSSH"));
-            dirs.push(sr.join("SysNative").join("OpenSSH"));
-        }
-        for pf in ["ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"] {
-            if let Some(d) = std::env::var_os(pf) {
-                dirs.push(PathBuf::from(d).join("OpenSSH"));
-            }
-        }
-    }
     dirs.push(PathBuf::from("/usr/local/bin"));
     dirs.push(PathBuf::from("/usr/bin"));
     dirs.push(PathBuf::from("/opt/homebrew/bin"));
@@ -92,7 +66,7 @@ pub fn nomes_de_executavel_em(bin: &str, windows: bool) -> Vec<String> {
 
 /// **O quê:** os nomes que `bin` pode ter NESTE sistema. **Onde:** [`resolve_bin`].
 fn nomes_de_executavel(bin: &str) -> Vec<String> {
-    nomes_de_executavel_em(bin, cfg!(windows))
+    nomes_de_executavel_em(bin, super::plataforma::os() == super::plataforma::Os::Windows)
 }
 
 /// **O quê:** caminho ABSOLUTO de `bin` — primeiro no `$PATH`, depois nos de fallback.
@@ -117,60 +91,33 @@ pub fn resolve_bin(bin: &str) -> Option<PathBuf> {
 }
 
 /// **O quê:** `true` se `bin` existe no `$PATH` ou nos fallbacks — checagem barata para dar
-/// erro claro antes de tentar spawnar algo inexistente. **Onde:** [`spawn_no_terminal`].
+/// erro claro antes de tentar spawnar algo inexistente. **Onde:** `toolchain` e `plataforma`.
 pub fn binary_in_path(bin: &str) -> bool {
     resolve_bin(bin).is_some()
 }
 
-/// **O quê:** abre um COMANDO arbitrário num terminal do sistema, desacoplado deste processo.
+/// **O quê:** abre um COMANDO arbitrário num terminal do sistema, desacoplado deste processo
+/// (costura `plat.terminal`).
 ///
-/// **Onde:** `vps::conexao::abrir_no_terminal`.
+/// **Onde:** `vps::conexao::abrir_no_terminal` (alias [`crate::agentrun`]).
 ///
-/// Envolve o comando num script temporário porque é isso que [`spawn_no_terminal`] sabe
-/// lançar em todos os emuladores — cada um recebe comando de um jeito, e o script normaliza.
-pub fn abrir_comando_no_terminal(comando: &str) -> Result<String, String> {
+/// Envolve o comando num script temporário porque é isso que o `Terminal` sabe lançar em todos
+/// os emuladores — cada um recebe comando de um jeito, e o script normaliza. `exec` no fim: o
+/// shell do wrapper some e o terminal fica com o processo de verdade, então fechar a janela
+/// encerra a sessão em vez de deixar um ssh órfão.
+pub fn abrir_comando_no_terminal(ctx: &crate::ctx::Ctx, comando: &str) -> Result<(), String> {
+    use schematize_plataforma::seams::terminal::{Emuladores, Entrega, ScriptTerminal};
     let dir = super::util::home_app_dir().join("run");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("não consegui criar {}: {e}", dir.display()))?;
-    let script = dir.join(format!("term-{}.sh", std::process::id()));
-    // `exec` no fim: o shell do wrapper some e o terminal fica com o processo de verdade,
-    // então fechar a janela encerra a sessão em vez de deixar um ssh órfão.
-    std::fs::write(&script, format!("#!/bin/sh\nexec {comando}\n"))
-        .map_err(|e| format!("não consegui gravar {}: {e}", script.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700));
-    }
-    spawn_no_terminal(&script)
-}
-
-/// **O quê:** lança `script` no primeiro emulador de terminal disponível, em grupo de
-/// processos próprio. **Saída:** o nome do terminal usado. **Efeitos:** cria processo.
-fn spawn_no_terminal(script: &Path) -> Result<String, String> {
-    let term = TERMINAIS.iter().find(|t| binary_in_path(t)).ok_or_else(|| {
-        "nenhum terminal encontrado (konsole/gnome-terminal/xterm/…).".to_string()
-    })?;
-    let mut cmd = std::process::Command::new(term);
-    match *term {
-        // esses usam `--` pra separar o comando a executar
-        "gnome-terminal" | "xfce4-terminal" => {
-            cmd.arg("--").arg("bash").arg(script);
-        }
-        _ => {
-            cmd.arg("-e").arg("bash").arg(script);
-        }
-    }
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0); // desacopla do app: sobrevive se o app fechar
-    }
-    cmd.spawn().map_err(|e| format!("abrir terminal `{term}`: {e}"))?;
-    Ok((*term).to_string())
+    ctx.plat.terminal.abrir_script(&ScriptTerminal {
+        entrega: Entrega::Arquivo {
+            caminho: dir.join(format!("term-{}.sh", std::process::id())),
+            corpo: format!("#!/bin/sh\nexec {comando}\n"),
+            modo: 0o700,
+        },
+        emuladores: Emuladores::Casa,
+    })
 }
 
 #[cfg(test)]

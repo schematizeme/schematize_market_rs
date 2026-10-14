@@ -121,12 +121,11 @@ impl Ambiente {
         let path_dirs = std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).collect())
             .unwrap_or_default();
-        let sistema: &[&str] =
-            if cfg!(windows) { &[] } else { &["/usr/bin", "/bin", "/usr/sbin", "/sbin"] };
+        let sistema: &[&str] = &["/usr/bin", "/bin", "/usr/sbin", "/sbin"];
         Ambiente {
             path_dirs,
             dirs_usuario: vec![home.join(".cargo").join("bin"), home.join(".local").join("bin")],
-            dirs_padrao: if cfg!(windows) { vec![] } else { vec![PathBuf::from("/usr/local/bin")] },
+            dirs_padrao: vec![PathBuf::from("/usr/local/bin")],
             dirs_sistema: sistema.iter().map(PathBuf::from).collect(),
             state_dir: plataforma::state_dir(),
             protegidos: std::env::current_exe().into_iter().collect(),
@@ -343,30 +342,12 @@ pub fn eh_janela(nome: &str) -> bool {
     nome.strip_suffix(".exe").unwrap_or(nome).ends_with("-gui")
 }
 
-/// **O quê:** para onde o Windows move um `.exe` em uso: `<stem>.old` (a mesma regra de
-/// `binario::substitui_binario`, que usa `with_extension("old")`). Pura.
-/// **Onde:** [`remover_real`] (Windows) e os testes.
-pub fn caminho_old(p: &Path) -> PathBuf {
-    p.with_extension("old")
-}
-
-/// **O quê:** remove `p`. No Windows, um `.exe` em uso (acesso negado) é renomeado para `.old`.
-/// **Onde:** [`Ambiente::real`]. Nunca segue symlink: `remove_file` apaga o link.
+/// **O quê:** remove `p`. Nunca segue symlink: `remove_file` apaga o link. O retorno
+/// `Some(novo_caminho)` existe para quem aposenta o arquivo em vez de apagá-lo (o Windows, em
+/// `schematize_windows_rs`); aqui é sempre `None`.
+/// **Onde:** [`Ambiente::real`].
 pub(crate) fn remover_real(p: &Path) -> io::Result<Option<PathBuf>> {
-    match std::fs::remove_file(p) {
-        Ok(()) => Ok(None),
-        #[cfg(windows)]
-        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-            let velho = caminho_old(p);
-            match std::fs::remove_file(&velho) {
-                Ok(()) => {}
-                Err(x) if x.kind() == io::ErrorKind::NotFound => {}
-                Err(x) => return Err(x),
-            }
-            std::fs::rename(p, &velho).map(|()| Some(velho))
-        }
-        Err(e) => Err(e),
-    }
+    std::fs::remove_file(p).map(|()| None)
 }
 
 /// **O quê:** roda `programa args…` sem `DISPLAY`, com prazo; devolve a primeira linha do stdout

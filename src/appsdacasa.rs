@@ -22,6 +22,7 @@
 
 use crate::agentrun::resolve_bin;
 use crate::atualizar::instalacao;
+use crate::ctx::Ctx;
 use std::path::PathBuf;
 
 /// Um app EXTERNO do ecossistema — instalável à parte, e que o schematize apenas conhece.
@@ -117,11 +118,11 @@ pub fn avaliar_acesso(
 /// clone local) não depende do 404 público. **Quem tem credencial passa:** o 404 anônimo do
 /// `curl` é o que um repo privado diz a TODOS; um `git ls-remote` sem prompt pergunta com a
 /// credencial da pessoa, e só se ele também falhar o install é barrado.
-fn checar_acesso_ao_repo(bin: &str, repo: &str) -> Result<(), String> {
+fn checar_acesso_ao_repo(ctx: &Ctx, bin: &str, repo: &str) -> Result<(), String> {
     if crate::nucleo::plataforma::build_src_dir(repo).join(".git").is_dir() {
         return Ok(());
     }
-    let sonda = crate::nucleo::rede::url_do_ultimo_release_tipado(repo);
+    let sonda = crate::nucleo::rede::url_do_ultimo_release_tipado(ctx, repo);
     let veredito = avaliar_acesso(bin, repo, sonda);
     if veredito.is_ok() {
         return Ok(());
@@ -248,21 +249,22 @@ pub fn descobrir_app(bin: &str) -> Estado {
 /// **Herda o terminal de propósito:** a compilação leva minutos e pode pedir sudo para as
 /// libs de build. Capturar a saída deixaria a pessoa olhando um cursor parado, e o pedido de
 /// senha não teria onde aparecer.
-pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
+pub fn instalar_do_fonte(ctx: &Ctx, bin: &str) -> Result<(), String> {
     let app = crate::atualizar::APPS_GERIDOS
         .iter()
         .find(|a| a.bin == bin)
         .ok_or_else(|| format!("não sei de que repositório vem o `{bin}`"))?;
 
-    checar_acesso_ao_repo(app.bin, app.repo)?;
+    checar_acesso_ao_repo(ctx, app.bin, app.repo)?;
 
-    let cargo = crate::nucleo::plataforma::ensure_toolchain()?;
+    let cargo = ctx.receitas.garantir_toolchain(ctx.plat)?;
     // As libs de build do sistema: o Deployer e o Optimizer não desenham janela, mas o
     // `ensure_build_deps` também traz o compilador C e o `pkg-config`, sem os quais nem as
     // deps nativas comuns linkam. É o mesmo passo que o `install.sh` fazia antes de compilar.
-    crate::nucleo::plataforma::ensure_build_deps()?;
+    ctx.receitas.garantir_build_deps(ctx.plat)?;
 
     crate::atualizar::fonte::build_one(
+        ctx,
         cargo.to_str().unwrap_or("cargo"),
         app.repo,
         &[],
@@ -278,7 +280,7 @@ pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
     // mas é dita, nunca engolida.
     if let Some((nome, dst)) = app.gui_nome_e_destino() {
         let built = crate::nucleo::plataforma::shared_target_dir().join("release").join(&nome);
-        match crate::atualizar::binario::substitui_binario(&built, &dst) {
+        match crate::atualizar::binario::substitui_binario(ctx, &built, &dst) {
             Ok(()) => println!("✓ {nome}"),
             Err(e) => println!("aviso: `{}` está instalado, mas a janela não: {e}", app.bin),
         }
@@ -298,6 +300,7 @@ pub fn instalar_do_fonte(bin: &str) -> Result<(), String> {
 /// repo não tem release casando; rede/cota fora é `Err`, não build. Registra o método `binario`
 /// (D8); o `fonte` é registrado por [`instalar_do_fonte`]. `confirmar` recebe o motivo.
 pub fn instalar_app_da_casa(
+    ctx: &Ctx,
     bin: &str,
     dry_run: bool,
     confirmar: impl FnOnce(&str) -> bool,
@@ -321,14 +324,15 @@ pub fn instalar_app_da_casa(
         fora,
     };
     let r = instalacao::instalar_com(
-        &release::RedeReal,
-        &divergencia::CommitsReais::github(),
+        ctx,
+        &release::RedeReal(ctx),
+        &divergencia::CommitsReais::github(ctx),
         &entrada,
         &limpeza::Ambiente::real(),
         &|de_binario| limpeza::alvo_do_app(app, de_binario),
         dry_run,
         confirmar,
-        || instalar_do_fonte(bin),
+        || instalar_do_fonte(ctx, bin),
     )?;
     if matches!(r, instalacao::Resultado::Instalado(release::Via::Release(_))) {
         metodo::registrar(app.repo, alvo::Metodo::Binario);
@@ -520,10 +524,10 @@ mod tests {
         let cli = include_str!("cli/instalar.rs");
         let producao = cli.split("#[cfg(test)]").next().unwrap_or(cli);
         assert!(
-            producao.contains("instalar_app_da_casa(a.bin"),
+            producao.contains("instalar_app_da_casa(ctx, a.bin"),
             "a CLI deve chamar instalar_app_da_casa"
         );
-        assert!(!producao.contains("instalar_do_fonte(a.bin)"), "build direto voltou à CLI");
+        assert!(!producao.contains("instalar_do_fonte(ctx, a.bin)"), "build direto voltou à CLI");
         let aqui = include_str!("appsdacasa.rs");
         let corpo = aqui.split("pub fn instalar_app_da_casa").nth(1).unwrap_or("");
         let corpo = corpo.split("pub fn registrar_no_menu").next().unwrap_or("");

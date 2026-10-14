@@ -14,6 +14,7 @@
 //! nada de errado — o gestor mirou algo que não existe para ela (§37.48).
 
 use super::{release, versao};
+use crate::ctx::Ctx;
 use crate::nucleo::{plataforma, rede};
 
 /// **O quê:** como este componente foi instalado nesta máquina.
@@ -166,30 +167,30 @@ fn nome_do_asset(repo: &str) -> Option<String> {
 /// **O quê:** consulta o último release publicado de `repo` e se ele tem o asset desta
 /// plataforma (e o da janela, quando o app declara uma). Toca a rede. **Onde:** [`alvo_de`],
 /// só para instalações por binário.
-pub fn consultar_publicado(repo: &str) -> Result<Publicado, String> {
+pub fn consultar_publicado(ctx: &Ctx, repo: &str) -> Result<Publicado, String> {
     let assets = assets_do_repo(repo)
         .ok_or_else(|| format!("esta plataforma não tem binário pré-compilado de {repo}"))?;
-    release::como_publicado(release::consultar(&release::RedeReal, repo, &assets))
+    release::como_publicado(release::consultar(&release::RedeReal(ctx), repo, &assets))
 }
 
 /// **O quê:** o último RELEASE publicado de `repo`, para exibir. `Ok(None)` = o repo não tem
 /// release; `Err` = não consegui saber. Toca a rede. **Onde:** o `status`.
-pub fn release_publicada(repo: &str) -> Result<Option<String>, rede::Causa> {
-    rede::url_do_ultimo_release_tipado(repo)
+pub fn release_publicada(ctx: &Ctx, repo: &str) -> Result<Option<String>, rede::Causa> {
+    rede::url_do_ultimo_release_tipado(ctx, repo)
         .map(|u| versao_da_url_de_release(&u))
         .map_err(|(causa, _)| causa)
 }
 
 /// **O quê:** o alvo de `repo` agora: descobre o método, consulta o que o método precisa e
 /// decide por [`escolher_alvo`]. **Onde:** o `update`, o plano e o `status`.
-pub fn alvo_de(repo: &str) -> Alvo {
+pub fn alvo_de(ctx: &Ctx, repo: &str) -> Alvo {
     let metodo = metodo_de(repo);
     match metodo {
         Metodo::Fonte => {
-            let main = versao::latest_version_of(repo);
+            let main = versao::latest_version_of(ctx, repo);
             escolher_alvo(metodo, main.as_deref(), &Err(String::new()))
         }
-        Metodo::Binario => escolher_alvo(metodo, None, &consultar_publicado(repo)),
+        Metodo::Binario => escolher_alvo(metodo, None, &consultar_publicado(ctx, repo)),
     }
 }
 
@@ -199,10 +200,10 @@ pub fn alvo_de(repo: &str) -> Alvo {
 ///
 /// **O pin vence e não é checado:** quem fixou uma versão pediu aquela, com ou sem asset. Se
 /// não houver binário dela, o `update` diz isso — não troca por outra nem compila.
-pub fn alvo_do_app() -> Alvo {
+pub fn alvo_do_app(ctx: &Ctx) -> Alvo {
     match versao::read_pin() {
         Some(p) => Alvo::Versao(p),
-        None => alvo_de(plataforma::APP_REPO),
+        None => alvo_de(ctx, plataforma::APP_REPO),
     }
 }
 
@@ -211,8 +212,8 @@ pub fn alvo_do_app() -> Alvo {
 /// **Onde:** o plano, o `status` e [`super::atualizar_componente`] — no lugar do antigo
 /// `latest_version_of` direto. `SemAsset` devolve a versão do release: a pessoa vê o que há
 /// de novo, e o `update` explica por que não instala.
-pub fn ultima_publicada(repo: &str) -> Option<String> {
-    match alvo_de(repo) {
+pub fn ultima_publicada(ctx: &Ctx, repo: &str) -> Option<String> {
+    match alvo_de(ctx, repo) {
         Alvo::Versao(v) | Alvo::SemAsset { versao: v } => Some(v),
         Alvo::Indisponivel(_) => None,
     }

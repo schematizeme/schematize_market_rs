@@ -38,6 +38,7 @@ pub mod release;
 pub mod selfupdate;
 pub mod versao;
 
+use crate::ctx::Ctx;
 use crate::nucleo::i18n::{t, tf};
 use crate::nucleo::plataforma;
 use componentes::{
@@ -315,10 +316,10 @@ pub fn estado_dos_apps() -> Vec<&'static AppGerido> {
 ///
 /// **`dry_run` não toca em nada:** imprime o plano e sai. É o que permite alguém ver o que vai
 /// acontecer numa máquina de produção antes de deixar acontecer.
-pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
+pub fn install_or_update(ctx: &Ctx, force: bool, dry_run: bool) -> Result<(), String> {
     // D7: o alvo é o que está PUBLICADO para este método de instalação. Sem asset, o app não
     // é tocado e o motivo sobe no fim — mas os componentes seguem (piso 10).
-    let (target, falha_do_alvo) = match alvo::alvo_do_app() {
+    let (target, falha_do_alvo) = match alvo::alvo_do_app(ctx) {
         alvo::Alvo::Versao(v) => (Some(v), None),
         alvo::Alvo::SemAsset { versao } => {
             (None, Some(alvo::mensagem_sem_binario(plataforma::APP_REPO, &versao)))
@@ -336,13 +337,17 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
         plano.app = false;
     }
     // D12: mesma versão, outro commit -> reinstala do release (salvo `fonte`).
-    if !force && !a_frente && !plano.app && hub_diverge(installed.as_deref(), target.as_deref()) {
+    if !force
+        && !a_frente
+        && !plano.app
+        && hub_diverge(ctx, installed.as_deref(), target.as_deref())
+    {
         plano.app = true;
     }
 
     if dry_run {
         match (&target, &falha_do_alvo) {
-            (Some(alvo), _) => imprimir_plano(&plano, installed.as_deref(), alvo),
+            (Some(alvo), _) => imprimir_plano(ctx, &plano, installed.as_deref(), alvo),
             (None, Some(msg)) => println!("{msg}"),
             (None, None) => {}
         }
@@ -371,7 +376,7 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
                 &[("target", &target), ("installed", &ou_nenhum(installed.as_deref()))]
             )
         );
-        atualizar_app(&target).err()
+        atualizar_app(ctx, &target).err()
     } else if let (true, Some(target)) = (a_frente, target.as_deref()) {
         exibir::avisar_a_frente("schematize", installed.as_deref(), target);
         limpar_versoes_antigas_do_hub();
@@ -387,7 +392,7 @@ pub fn install_or_update(force: bool, dry_run: bool) -> Result<(), String> {
     // Cada componente é INDEPENDENTE (piso 10): a falha de um nunca derruba os outros nem o
     // comando. O erro é DITO — nunca engolido —, e o `update` segue.
     for app in &plano.componentes {
-        atualizar_componente(app, force);
+        atualizar_componente(ctx, app, force);
     }
 
     aposentar_o_updater();
@@ -655,7 +660,7 @@ mod tests {
         let fonte = include_str!("mod.rs");
         let corpo = fonte.split("pub fn install_or_update").nth(1).unwrap();
         let corpo = corpo.split("\n}\n").next().unwrap();
-        let i_comp = corpo.find("atualizar_componente(app, force)").expect("o laço");
+        let i_comp = corpo.find("atualizar_componente(ctx, app, force)").expect("o laço");
         let i_apos = corpo.find("aposentar_o_updater()").expect("a aposentadoria");
         assert!(i_apos > i_comp, "o antecessor sai DEPOIS do update, nunca antes");
     }
@@ -703,14 +708,14 @@ mod tests {
         let corpo = corpo.split("\n}\n").next().unwrap();
 
         assert!(
-            !corpo.contains("atualizar_app(&target)?"),
+            !corpo.contains("atualizar_app(ctx, &target)?"),
             "o `?` voltou: uma falha do app cortaria o self-update, e a máquina ficaria presa"
         );
-        assert!(corpo.contains("atualizar_app(&target).err()"), "a falha tem de ser GUARDADA");
+        assert!(corpo.contains("atualizar_app(ctx, &target).err()"), "a falha tem de ser GUARDADA");
 
         // A ordem: guardar a falha → componentes → aposentar o antecessor → devolver o erro.
         let i_falha = corpo.find("let falha_do_app").expect("a falha guardada");
-        let i_comp = corpo.find("atualizar_componente(app, force)").expect("o laço");
+        let i_comp = corpo.find("atualizar_componente(ctx, app, force)").expect("o laço");
         let i_ret = corpo.find("Some(e) => Err(e)").expect("o erro devolvido no fim");
         assert!(i_falha < i_comp, "guarda a falha antes de rodar os componentes");
         assert!(i_comp < i_ret, "os componentes rodam ANTES de o erro subir");

@@ -11,22 +11,23 @@
 //! rasa seria somar os apps à tabela do `env`. A leitura certa é que `env` e `apps` eram o
 //! mesmo produto partido em dois comandos — e é por isso que este app existe (ADR-0012).
 
-use market::appsdacasa::{descobrir_app, Estado, EXTERNOS};
-use market::i18n::t;
-use market::nucleo::{desktop, icone, util};
+use crate::appsdacasa::{descobrir_app, Estado, EXTERNOS};
+use crate::ctx::Ctx;
+use crate::i18n::t;
+use crate::nucleo::{desktop, util};
 
 /// **O quê:** imprime tudo que este app instala, e o estado de cada coisa.
 /// **Onde:** `schematize-market list`, e o lançador do menu de aplicativos (com `--wait`).
-pub(crate) fn list_cmd(wait: bool, json: bool) -> Result<(), String> {
+pub(crate) fn list_cmd(ctx: &Ctx, wait: bool, json: bool) -> Result<(), String> {
     // JSON é contrato de máquina: sai sozinho, sem o cabeçalho humano e sem o `--wait`, que
     // são da tela. Misturar os dois daria um JSON que só parseia depois de alguém cortar as
     // primeiras linhas — que é o mesmo tipo de contrato-por-acidente que este modo existe
     // para acabar.
     if json {
-        crate::cli::listajson::imprimir();
+        crate::cli::listajson::imprimir(ctx);
         return Ok(());
     }
-    market::environments::list();
+    crate::environments::list(ctx);
     println!();
     secao_apps();
     if wait {
@@ -64,10 +65,10 @@ fn esperar_tecla() {
 
 /// **O quê:** instala ou remove o ícone e a entrada no menu de aplicativos.
 /// **Onde:** `schematize-market desktop --install|--remove`, e o `install.sh`.
-pub(crate) fn desktop_cmd(install: bool, remove: bool) -> Result<(), String> {
+pub(crate) fn desktop_cmd(ctx: &Ctx, install: bool, remove: bool) -> Result<(), String> {
     let home = util::home();
     if remove {
-        let havia = desktop::remover(&home)?;
+        let havia = desktop::remover(ctx, &home)?;
         println!("{}", if havia { "removido." } else { "não havia entrada." });
         return Ok(());
     }
@@ -76,8 +77,7 @@ pub(crate) fn desktop_cmd(install: bool, remove: bool) -> Result<(), String> {
         println!("{}: {}", if f.exists() { "instalado" } else { "ausente" }, f.display());
         return Ok(());
     }
-    icone::install_all(&home).map_err(|e| format!("não consegui gravar o ícone: {e}"))?;
-    let f = desktop::instalar(&home, std::path::Path::new(&util::self_exe()))?;
+    let f = desktop::instalar(ctx, &home, std::path::Path::new(&util::self_exe()))?;
     println!("✓ {}", f.display());
     Ok(())
 }
