@@ -80,23 +80,29 @@ fn instalar_rustup_windows() -> Result<(), String> {
 pub fn ensure_build_deps() -> Result<(), String> {
     match plataforma::os() {
         Os::Linux => ensure_build_deps_linux(),
+        Os::FreeBsd => ensure_build_deps_freebsd(),
         Os::Mac => ensure_build_deps_mac(),
         Os::Windows => ensure_build_deps_windows(),
     }
 }
 
-/// **O quê:** o prefixo de elevação — `"sudo"` ou vazio. **Onde:** [`pkg_install`].
+/// **O quê:** o prefixo de elevação — `"sudo"`, `"doas"` (FreeBSD sem sudo) ou vazio.
+/// **Onde:** [`pkg_install`].
 ///
-/// Vazio quando já se é root (sudo em cima de root é ruído) ou quando não há `sudo` na
+/// Vazio quando já se é root (sudo em cima de root é ruído) ou quando não há escalador na
 /// máquina — nesse caso o comando roda como está e o gerenciador de pacotes é quem diz que
 /// falta permissão, com a mensagem dele, que é melhor que uma nossa adivinhando.
 #[cfg(not(windows))]
 fn sudo() -> &'static str {
     let is_root = util::capture("id", &["-u"]).map(|u| u == "0").unwrap_or(false);
-    if is_root || !super::bin::binary_in_path("sudo") {
+    if is_root {
         ""
-    } else {
+    } else if super::bin::binary_in_path("sudo") {
         "sudo"
+    } else if cfg!(target_os = "freebsd") && super::bin::binary_in_path("doas") {
+        "doas"
+    } else {
+        ""
     }
 }
 
@@ -277,6 +283,52 @@ fn ensure_build_deps_linux() -> Result<(), String> {
     Ok(())
 }
 
+/// **O quê:** no-op — não há FreeBSD para preparar quando o alvo é Windows.
+/// **Onde:** [`ensure_build_deps`]. Mesmo motivo do irmão `_linux`.
+#[cfg(windows)]
+fn ensure_build_deps_freebsd() -> Result<(), String> {
+    Ok(())
+}
+
+/// **O quê:** os pacotes `pkg` do FreeBSD para compilar a GUI (Slint): `(obrigatórios, fontes)`.
+/// O primeiro token é o gerenciador (como em [`pacotes_de_build`]). PURA.
+/// **Onde:** [`ensure_build_deps_freebsd`] e o teste da tabela. O compilador (clang) já vem na
+/// base do FreeBSD; `curl` e `git` entram porque o base só traz `fetch` e todo download/clone daqui usa os dois.
+#[cfg(not(windows))]
+fn pacotes_de_build_freebsd() -> (Vec<&'static str>, Vec<&'static str>) {
+    (
+        vec![
+            "pkg",
+            "install",
+            "-y",
+            "curl",
+            "git",
+            "pkgconf",
+            "libX11",
+            "libXcursor",
+            "libXrandr",
+            "libXi",
+            "libxkbcommon",
+            "wayland",
+            "mesa-libs",
+            "libxcb",
+            "fontconfig",
+        ],
+        vec!["pkg", "install", "-y", "dejavu", "noto-basic"],
+    )
+}
+
+/// **O quê:** instala as deps do Slint no FreeBSD via `pkg` (com sudo/doas se preciso).
+/// **Onde:** [`ensure_build_deps`] no FreeBSD.
+#[cfg(not(windows))]
+fn ensure_build_deps_freebsd() -> Result<(), String> {
+    let (obrigatorios, fontes) = pacotes_de_build_freebsd();
+    pkg_install(&obrigatorios)?;
+    // Fontes: best-effort (sem elas a GUI abre, só não desenha alguns alfabetos).
+    let _ = pkg_install(&fontes);
+    Ok(())
+}
+
 /// **O quê:** no-op — não há macOS para preparar quando o alvo é Windows.
 /// **Onde:** [`ensure_build_deps`]. Mesmo motivo do irmão acima.
 #[cfg(windows)]
@@ -380,6 +432,19 @@ mod tests {
                     "{fam:?} não cobre nenhum de {grupo:?} — vira erro de linker no fim do build"
                 );
             }
+        }
+    }
+
+    /// FreeBSD: a lista começa por `pkg`, traz curl e cobre as libs que o Slint linka.
+    #[test]
+    fn freebsd_tem_lista_de_pkg_com_as_libs_do_slint() {
+        let (obrig, fontes) = pacotes_de_build_freebsd();
+        assert_eq!(obrig[0], "pkg");
+        assert_eq!(fontes[0], "pkg");
+        for lib in
+            ["curl", "libX11", "libxkbcommon", "wayland", "mesa-libs", "libxcb", "fontconfig"]
+        {
+            assert!(obrig.contains(&lib), "FreeBSD sem {lib}: {obrig:?}");
         }
     }
 

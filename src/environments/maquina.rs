@@ -25,6 +25,11 @@ impl Machine {
     /// Ok se o método é utilizável aqui; Err(razão) caso contrário (deny-by-default).
     pub(crate) fn method_reason(&self, m: Method) -> Result<(), String> {
         match m {
+            // FreeBSD: sem Docker nativo (imagens são Linux) e sem build do mise — recusa honesta
+            // aqui evita listar como "disponível" o que o plano depois negaria.
+            Method::Docker | Method::Mise if self.family == Family::FreeBsd => {
+                Err(tf("env.na_freebsd_method_any", &[("method", m.slug())]))
+            }
             Method::Docker if !self.docker => Err("docker não encontrado no PATH.".into()),
             Method::Distro if self.family == Family::Unknown => {
                 Err("família da distro não detectada (/etc/os-release).".into())

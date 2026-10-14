@@ -164,12 +164,24 @@ pub fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// **O quê:** o shell que roda os comandos dos planos: `bash` (o que os receitas e instaladores
+/// oficiais assumem) e, só no FreeBSD, `sh` quando o bash não está instalado — o FreeBSD base
+/// não o traz, e "bash não encontrado" seria erro de quem não tem como saber o que é bash.
+/// **Onde:** [`run_shell`] e a sonda `has_bin` do engine de environments.
+pub fn login_shell() -> &'static str {
+    if cfg!(target_os = "freebsd") && !super::bin::binary_in_path("bash") {
+        "sh"
+    } else {
+        "bash"
+    }
+}
+
 /// Executa um comando de shell HERDANDO o terminal (stdin/stdout/stderr).
 /// Ao contrário de `run` (que captura), este deixa o processo interagir com o usuário —
 /// essencial pra `sudo` pedir senha e pra instaladores oficiais mostrarem progresso.
 /// Fluxo: usado APENAS pelo engine de environments, DEPOIS do consentimento explícito.
 pub fn run_shell(cmd: &str) -> Result<(), String> {
-    let status = Command::new("bash")
+    let status = Command::new(login_shell())
         .arg("-lc")
         .arg(cmd)
         .status()

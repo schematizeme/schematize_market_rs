@@ -64,9 +64,14 @@ mod tests {
     fn matriz_lang_metodo_completa() {
         for env in defs::ENVS {
             for method in Method::ALL {
-                for fam in
-                    [Family::Debian, Family::Suse, Family::Fedora, Family::Arch, Family::Unknown]
-                {
+                for fam in [
+                    Family::Debian,
+                    Family::Suse,
+                    Family::Fedora,
+                    Family::Arch,
+                    Family::FreeBsd,
+                    Family::Unknown,
+                ] {
                     let r = defs::install_recipe(env, method, fam, true);
                     match r {
                         Recipe::Steps(s) => {
@@ -161,16 +166,16 @@ mod tests {
         assert_eq!(calls, 2);
     }
 
-    /// As 3 ferramentas existem, têm bin/slug/hint e aparecem no status() (categoria "tool").
+    /// As 4 ferramentas existem, têm bin/slug/hint e aparecem no status() (categoria "tool").
     #[test]
-    fn tabela_tres_ferramentas() {
-        let slugs = ["claude", "code", "codex"];
-        assert_eq!(defs::TOOLS.len(), 3);
+    fn tabela_quatro_ferramentas() {
+        let slugs = ["claude", "code", "codex", "cursor"];
+        assert_eq!(defs::TOOLS.len(), 4);
         for s in slugs {
             let t = defs::find_tool(s).expect("ferramenta presente");
             assert!(!t.display.is_empty() && !t.bin.is_empty() && !t.source_hint.is_empty());
         }
-        // status() lista linguagens E ferramentas; as 3 ferramentas estão lá como "tool".
+        // status() lista linguagens E ferramentas; as 4 ferramentas estão lá como "tool".
         let all = status();
         for s in slugs {
             let le = all.iter().find(|e| e.lang == s).expect("ferramenta no status");
@@ -296,6 +301,119 @@ mod tests {
             }
             _ => panic!("codex remove tem Steps"),
         }
+    }
+
+    /// Cursor: instalador oficial, SEM sudo, com `pipe_sh`, em toda família Linux — e o bin
+    /// detectado é o `cursor-agent` (o que o instalador cria em ~/.local/bin).
+    #[test]
+    fn cursor_instala_sem_sudo_via_pipe_bash() {
+        let cursor = defs::find_tool("cursor").unwrap();
+        assert_eq!(cursor.bin, "cursor-agent");
+        assert_eq!(cursor.display, "Cursor CLI");
+        for fam in [Family::Debian, Family::Suse, Family::Fedora, Family::Arch, Family::Unknown] {
+            match defs::tool_install_recipe(cursor, fam) {
+                Recipe::Steps(s) => {
+                    assert_eq!(s.len(), 1, "{fam:?}: um passo só");
+                    assert_eq!(s[0].cmd, "curl https://cursor.com/install -fsS | bash");
+                    assert!(!s[0].sudo, "{fam:?}: o instalador do Cursor não usa sudo");
+                    assert!(
+                        s[0].pipe_sh,
+                        "{fam:?}: curl|bash tem de carregar o selo de código remoto"
+                    );
+                    assert!(s[0].source.contains("cursor.com/install"));
+                }
+                _ => panic!("cursor tem Steps em {fam:?}"),
+            }
+        }
+    }
+
+    /// Remover o Cursor apaga os links e as versões do instalador — e só apaga o link genérico
+    /// `agent` se ele apontar pro cursor-agent (nunca o `agent` de outro programa).
+    #[test]
+    fn cursor_remove_os_caminhos_do_instalador() {
+        let cursor = defs::find_tool("cursor").unwrap();
+        for fam in [Family::Debian, Family::Fedora, Family::Arch] {
+            match defs::tool_remove_recipe(cursor, fam) {
+                Recipe::Steps(s) => {
+                    let c = &s[0].cmd;
+                    assert!(!s[0].sudo, "tudo em $HOME, sem sudo");
+                    assert!(c.contains("$HOME/.local/bin/cursor-agent"), "{c}");
+                    assert!(c.contains("$HOME/.local/share/cursor-agent"), "{c}");
+                    assert!(c.contains("readlink") && c.contains("*cursor-agent*)"), "{c}");
+                    assert!(c.contains("$HOME/.local/bin/agent"), "{c}");
+                    assert!(!c.contains("/usr"), "só dentro do HOME: {c}");
+                }
+                _ => panic!("cursor remove tem Steps"),
+            }
+        }
+    }
+
+    /// FreeBSD: NENHUMA ferramenta tem build/instalador FreeBSD — todas dão `Na` com texto
+    /// acionável (nunca instalar algo que não executa), na instalação E na remoção.
+    #[test]
+    fn freebsd_ferramentas_sao_na_com_mensagem() {
+        for tool in defs::TOOLS {
+            for r in [
+                defs::tool_install_recipe(tool, Family::FreeBsd),
+                defs::tool_remove_recipe(tool, Family::FreeBsd),
+            ] {
+                match r {
+                    Recipe::Na(n) => assert!(n.contains(tool.display), "{}: {n}", tool.slug),
+                    _ => panic!("{} no FreeBSD tem de ser Na", tool.slug),
+                }
+            }
+        }
+    }
+
+    /// FreeBSD: docker/mise nunca são oferecidos, e os instaladores oficiais que baixam
+    /// binário Linux (go/.NET/node) também não — todos apontam `--method distro`.
+    #[test]
+    fn freebsd_nao_oferece_metodo_que_nao_roda() {
+        for env in defs::ENVS {
+            for m in [Method::Docker, Method::Mise] {
+                match defs::install_recipe(env, m, Family::FreeBsd, true) {
+                    Recipe::Na(n) => assert!(n.contains("distro"), "{} {m:?}: {n}", env.lang),
+                    _ => panic!("{} {m:?} no FreeBSD tem de ser Na", env.lang),
+                }
+            }
+        }
+        for lang in ["go", "csharp", "node"] {
+            let env = defs::find(lang).unwrap();
+            assert!(matches!(
+                defs::install_recipe(env, Method::Official, Family::FreeBsd, false),
+                Recipe::Na(_)
+            ));
+        }
+        // Rust oficial (rustup) segue possível: tem alvo x86_64-unknown-freebsd.
+        let rust = defs::find("rust").unwrap();
+        assert!(matches!(
+            defs::install_recipe(rust, Method::Official, Family::FreeBsd, false),
+            Recipe::Steps(_)
+        ));
+        // E a máquina FreeBSD não lista Docker/Mise como disponíveis.
+        let m = Machine { family: Family::FreeBsd, mise: true, docker: true };
+        assert_eq!(m.available(), vec![Method::Distro, Method::Official]);
+    }
+
+    /// FreeBSD + distro: ou há plano `pkg` (com sudo/doas conforme a máquina) ou há recusa com
+    /// motivo — e o .NET (sem pacote confirmado) é sempre recusa que aponta outra saída.
+    #[test]
+    fn freebsd_distro_usa_pkg_ou_recusa_com_motivo() {
+        let go = defs::find("go").unwrap();
+        match defs::install_recipe(go, Method::Distro, Family::FreeBsd, false) {
+            Recipe::Steps(s) => {
+                assert!(s[0].sudo);
+                assert!(s[0].cmd.contains("pkg install -y go"), "{}", s[0].cmd);
+                assert!(!s[0].cmd.contains("apt") && !s[0].cmd.contains("pacman"));
+            }
+            Recipe::Na(n) => assert!(!n.is_empty()),
+            Recipe::Todo(_) => panic!("go/distro no FreeBSD não é Todo"),
+        }
+        let cs = defs::find("csharp").unwrap();
+        assert!(matches!(
+            defs::install_recipe(cs, Method::Distro, Family::FreeBsd, false),
+            Recipe::Na(_)
+        ));
     }
 
     /// Decisão PURA de "precisa fixar o PATH?": só quando o bin NÃO está no PATH mas

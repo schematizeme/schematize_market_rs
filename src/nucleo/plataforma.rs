@@ -76,6 +76,8 @@ pub const MARKET_REPO: &str = "schematizeme/schematize_market_rs";
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Os {
     Linux,
+    /// FreeBSD (x86_64): asset próprio `freebsd-x86_64`, pacotes por `pkg`.
+    FreeBsd,
     Mac,
     Windows,
 }
@@ -90,7 +92,11 @@ pub fn os() -> Os {
     {
         Os::Mac
     }
-    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    #[cfg(target_os = "freebsd")]
+    {
+        Os::FreeBsd
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "freebsd")))]
     {
         Os::Linux
     }
@@ -281,6 +287,7 @@ fn alvo_de_asset() -> Option<(&'static str, &'static str)> {
 pub fn alvo_de_asset_para(os: Os, arch: &str) -> Option<(&'static str, &'static str)> {
     match (os, arch) {
         (Os::Linux, "x86_64") => Some(("linux-x86_64", "")),
+        (Os::FreeBsd, "x86_64") => Some(("freebsd-x86_64", "")),
         (Os::Mac, "aarch64") => Some(("macos-arm64", "")),
         (Os::Mac, "x86_64") => Some(("macos-x86_64", "")),
         (Os::Windows, "x86_64") => Some(("windows-x86_64", ".exe")),
@@ -414,7 +421,8 @@ pub fn ensure_path_setup() {
 /// Linux: `.desktop` com `Exec` ABSOLUTO — o bug do lançador que abria o binário errado do
 /// PATH do ambiente gráfico. Mac/Windows: por ora só garante o binário no PATH.
 pub fn make_launcher() {
-    if os() != Os::Linux {
+    // Freedesktop (.desktop) vale no Linux e no FreeBSD; Mac/Windows têm outro mecanismo.
+    if !matches!(os(), Os::Linux | Os::FreeBsd) {
         return;
     }
     let (cli, gui) = bin_names();
@@ -526,7 +534,7 @@ mod tests {
         }
     }
 
-    /// Os QUATRO alvos que a matriz publica têm nome — e um alvo que não existe reprova.
+    /// Os CINCO alvos que a matriz publica têm nome — e um alvo que não existe reprova.
     ///
     /// Testa a REGRA sobre a tabela, não a máquina de quem roda: o teste anterior só consegue
     /// afirmar sobre a plataforma corrente, e três dos quatro alvos ficariam sem cobertura.
@@ -534,6 +542,8 @@ mod tests {
     fn cada_alvo_da_matriz_tem_nome_e_o_que_nao_esta_na_matriz_nao_tem() {
         let esperado = [
             ((Os::Linux, "x86_64"), Some(("linux-x86_64", ""))),
+            ((Os::FreeBsd, "x86_64"), Some(("freebsd-x86_64", ""))),
+            ((Os::FreeBsd, "aarch64"), None),
             ((Os::Mac, "aarch64"), Some(("macos-arm64", ""))),
             ((Os::Mac, "x86_64"), Some(("macos-x86_64", ""))),
             ((Os::Windows, "x86_64"), Some(("windows-x86_64", ".exe"))),
@@ -543,13 +553,8 @@ mod tests {
             ((Os::Windows, "aarch64"), None),
         ];
         for ((so, arch), esp) in esperado {
-            let obtido = match (so, arch) {
-                (Os::Linux, "x86_64") => Some(("linux-x86_64", "")),
-                (Os::Mac, "aarch64") => Some(("macos-arm64", "")),
-                (Os::Mac, "x86_64") => Some(("macos-x86_64", "")),
-                (Os::Windows, "x86_64") => Some(("windows-x86_64", ".exe")),
-                _ => None,
-            };
+            // Pela MESMA função de produção (antes o teste redigitava a tabela e era tautológico).
+            let obtido = alvo_de_asset_para(so, arch);
             assert_eq!(obtido, esp, "alvo ({so:?}, {arch}) fora do combinado");
         }
     }
@@ -587,6 +592,7 @@ mod tests {
         // produção, não por uma lista redigitada no teste.
         let mut no_codigo: Vec<String> = [
             ("linux-x86_64", ""),
+            ("freebsd-x86_64", ""),
             ("macos-arm64", ""),
             ("macos-x86_64", ""),
             ("windows-x86_64", ".exe"),

@@ -8,6 +8,7 @@
 //! nunca um chute.
 
 use super::detect::Family;
+use crate::i18n::{t, tf};
 
 mod distro;
 // Reexporta o que o `defs` usa e o que o resto do crate já chamava por `defs::…` — o corte é
@@ -124,6 +125,13 @@ pub const TOOLS: &[Tool] = &[
         desc: "OpenAI Codex CLI (needs Node.js)",
         bin: "codex",
         source_hint: "npm -g",
+    },
+    Tool {
+        slug: "cursor",
+        display: "Cursor CLI",
+        desc: "Cursor Agent CLI",
+        bin: "cursor-agent",
+        source_hint: "official (curl|bash)",
     },
 ];
 
@@ -316,9 +324,27 @@ pub fn tool_caveats(lang: &str, method: Method) -> Vec<&'static str> {
     v
 }
 
+/// **O quê:** no FreeBSD, o motivo de o `method` NÃO existir pra esta linguagem (`None` = segue).
+/// Docker (imagens Linux) e mise (sem build FreeBSD) não rodam; os instaladores oficiais de
+/// Go/.NET/Node (tarball linux-amd64, dotnet-install, fnm) também não. Sempre aponta a saída.
+/// **Onde:** [`install_recipe`], antes de montar passos. PURA.
+fn freebsd_sem_metodo(lang: &str, method: Method) -> Option<String> {
+    let sem = match method {
+        Method::Docker | Method::Mise => true,
+        Method::Official => matches!(lang, "go" | "csharp" | "node"),
+        Method::Distro => false,
+    };
+    sem.then(|| tf("env.na_freebsd_method", &[("lang", lang), ("method", method.slug())]))
+}
+
 /// Monta o plano de INSTALAÇÃO pra (env × método × família), sabendo se o mise já existe.
 /// Função PURA: só constrói os Steps, nunca executa.
 pub fn install_recipe(env: &Env, method: Method, fam: Family, mise_present: bool) -> Recipe {
+    if fam == Family::FreeBsd {
+        if let Some(motivo) = freebsd_sem_metodo(env.lang, method) {
+            return Recipe::Na(motivo);
+        }
+    }
     match method {
         Method::Docker => match docker_image(env.lang) {
             Some(img) => Recipe::Steps(vec![step(
@@ -358,6 +384,10 @@ pub fn install_recipe(env: &Env, method: Method, fam: Family, mise_present: bool
             // encontrado".
             if let Some(motivo) = distro_indisponivel(env.lang, fam) {
                 return Recipe::Na(motivo);
+            }
+            // FreeBSD: `pkg` exige root. Sem root, sudo nem doas, recusa ANTES do plano.
+            if fam == Family::FreeBsd && super::detect::escalador().is_none() {
+                return Recipe::Na(t("env.na_freebsd_no_root"));
             }
             let mut steps = Vec::new();
 
@@ -478,6 +508,11 @@ fn note_step(msg: &str) -> Step {
 
 /// Monta o plano de REMOÇÃO pra (env × método × família).
 pub fn remove_recipe(env: &Env, method: Method, fam: Family) -> Recipe {
+    if fam == Family::FreeBsd {
+        if let Some(motivo) = freebsd_sem_metodo(env.lang, method) {
+            return Recipe::Na(motivo);
+        }
+    }
     match method {
         Method::Docker => match docker_image(env.lang) {
             Some(img) => {
@@ -527,6 +562,13 @@ pub fn remove_recipe(env: &Env, method: Method, fam: Family) -> Recipe {
 
 /// Monta o plano de INSTALAÇÃO de uma ferramenta (varia por família só no VS Code).
 pub fn tool_install_recipe(tool: &Tool, fam: Family) -> Recipe {
+    // FreeBSD: nenhum dos instaladores/pacotes destas ferramentas tem build FreeBSD (os scripts
+    // do claude e do cursor só aceitam Linux/macOS; o npm do codex só traz binários
+    // linux/darwin/win32 e falha em runtime com "Unsupported platform"). Dizer isso é melhor
+    // que "instalar" algo que não executa.
+    if fam == Family::FreeBsd {
+        return Recipe::Na(tf("env.na_tool_freebsd", &[("tool", tool.display)]));
+    }
     match tool.slug {
         // Instalador oficial (sem sudo, vai pra ~/.local/bin). curl | bash = código remoto.
         "claude" => Recipe::Steps(vec![step(
@@ -593,7 +635,7 @@ pub fn tool_install_recipe(tool: &Tool, fam: Family) -> Recipe {
                  outro programa. Instale por um dos dois caminhos, à sua escolha."
                     .into(),
             ),
-            Family::Unknown => Recipe::Na(
+            Family::Unknown | Family::FreeBsd => Recipe::Na(
                 "família da distro não detectada — VS Code precisa de apt (.deb) ou dnf/zypper (rpm).".into(),
             ),
         },
@@ -614,12 +656,23 @@ pub fn tool_install_recipe(tool: &Tool, fam: Family) -> Recipe {
                 false,
             ),
         ]),
+        // Cursor Agent: instalador oficial (bash) -> ~/.local/share/cursor-agent + links em
+        // ~/.local/bin. Sem sudo. curl | bash = código remoto (selo reforçado no plano).
+        "cursor" => Recipe::Steps(vec![step(
+            "curl https://cursor.com/install -fsS | bash",
+            "https://cursor.com/install (instalador oficial Cursor)",
+            false,
+            true,
+        )]),
         _ => Recipe::Na(format!("ferramenta desconhecida: {}.", tool.slug)),
     }
 }
 
 /// Monta o plano de REMOÇÃO de uma ferramenta (varia por família só no VS Code).
 pub fn tool_remove_recipe(tool: &Tool, fam: Family) -> Recipe {
+    if fam == Family::FreeBsd {
+        return Recipe::Na(tf("env.na_tool_freebsd", &[("tool", tool.display)]));
+    }
     match tool.slug {
         // O instalador oficial não expõe uninstall documentado — remove o binário do ~/.local/bin.
         "claude" => Recipe::Steps(vec![step(
@@ -646,13 +699,28 @@ pub fn tool_remove_recipe(tool: &Tool, fam: Family) -> Recipe {
                  usou (pacman ou o helper de AUR)."
                     .into(),
             ),
-            Family::Unknown => Recipe::Na("família da distro não detectada.".into()),
+            Family::Unknown | Family::FreeBsd => {
+                Recipe::Na("família da distro não detectada.".into())
+            }
         },
         // Instalado como root (sudo npm -g) → remover também exige sudo (senão EACCES).
         "codex" => Recipe::Steps(vec![step(
             "sudo npm uninstall -g @openai/codex",
             "npmjs.com (@openai/codex)",
             true,
+            false,
+        )]),
+        // Cursor: o instalador só cria ~/.local/share/cursor-agent e os links `agent` e
+        // `cursor-agent` em ~/.local/bin (lido do script oficial). O link `agent` é nome
+        // genérico: só some se APONTA pro cursor-agent — nunca apaga o `agent` de outro programa.
+        // Config/login (~/.cursor) é dado do usuário e fica.
+        "cursor" => Recipe::Steps(vec![step(
+            "rm -f \"$HOME/.local/bin/cursor-agent\"; \
+             case \"$(readlink \"$HOME/.local/bin/agent\")\" in *cursor-agent*) \
+             rm -f \"$HOME/.local/bin/agent\";; esac; \
+             rm -rf \"$HOME/.local/share/cursor-agent\"",
+            "instalador oficial (sem uninstall — remove links e versões)",
+            false,
             false,
         )]),
         _ => Recipe::Na(format!("ferramenta desconhecida: {}.", tool.slug)),

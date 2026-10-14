@@ -38,7 +38,7 @@ pub(crate) enum Cmd {
     },
     /// Install a language runtime, a dev tool, or an ecosystem app.
     Install {
-        /// go|rust|node|… , claude|code|codex, or schematize-deployer|schematize-optimizer|…
+        /// go|rust|node|… , claude|code|codex|cursor, or schematize-deployer|schematize-optimizer|…
         #[arg(required_unless_present = "all")]
         what: Option<String>,
         /// Install ALL ecosystem apps (deployer, optimizer, database, git, skills, overdev) and their windows, plus the market window.

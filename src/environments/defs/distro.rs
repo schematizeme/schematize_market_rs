@@ -30,21 +30,35 @@ pub(super) struct DistroPkgs {
     dnf: &'static str,
     /// Arch e derivadas. Vazio = idem.
     arch: &'static str,
+    /// FreeBSD (`pkg`; nome do PACOTE, não do port). Vazio = não confirmado nos repos padrão —
+    /// nunca palpite: a via some e o plano oferece outra, em vez de um `pkg install` que morre.
+    freebsd: &'static str,
 }
 
 /// Mapa de pacotes de runtime da distro por linguagem.
 pub(super) fn distro_pkgs(lang: &str) -> Option<DistroPkgs> {
     Some(match lang {
-        "go" => DistroPkgs { debian: "golang-go", zypper: "go", dnf: "golang", arch: "go" },
+        "go" => DistroPkgs {
+            debian: "golang-go",
+            zypper: "go",
+            dnf: "golang",
+            arch: "go",
+            freebsd: "go",
+        },
         "rust" => DistroPkgs {
             debian: "rustc cargo",
             zypper: "rust cargo",
             dnf: "rust cargo",
             arch: "rust",
+            freebsd: "rust",
         },
-        "elixir" => {
-            DistroPkgs { debian: "elixir", zypper: "elixir", dnf: "elixir", arch: "elixir" }
-        }
+        "elixir" => DistroPkgs {
+            debian: "elixir",
+            zypper: "elixir",
+            dnf: "elixir",
+            arch: "elixir",
+            freebsd: "elixir",
+        },
         // O .NET é o caso que expôs o buraco: NÃO está nos repos padrão do openSUSE (medido:
         // `zypper search dotnet` devolve zero no Leap 16). O vazio aqui não é esquecimento —
         // é a informação de que essa via não existe, e é o que faz a ferramenta avisar em vez
@@ -54,13 +68,18 @@ pub(super) fn distro_pkgs(lang: &str) -> Option<DistroPkgs> {
             zypper: "",
             dnf: "dotnet-sdk-8.0",
             arch: "dotnet-sdk",
+            // Sem pacote `pkg` confirmado para o .NET SDK: vazio, não chute.
+            freebsd: "",
         },
-        "zig" => DistroPkgs { debian: "zig", zypper: "zig", dnf: "zig", arch: "zig" },
+        "zig" => {
+            DistroPkgs { debian: "zig", zypper: "zig", dnf: "zig", arch: "zig", freebsd: "zig" }
+        }
         "ruby" => DistroPkgs {
             debian: "ruby ruby-dev",
             zypper: "ruby ruby-devel",
             dnf: "ruby ruby-devel",
             arch: "ruby",
+            freebsd: "ruby",
         },
         // O SEGUNDO buraco da mesma classe do `csharp`, achado varrendo a coluna do zypper
         // pacote a pacote nesta máquina: `nodejs` e `npm` **não existem** com esse nome no
@@ -79,6 +98,7 @@ pub(super) fn distro_pkgs(lang: &str) -> Option<DistroPkgs> {
             zypper: "nodejs-default npm-default",
             dnf: "nodejs npm",
             arch: "nodejs npm",
+            freebsd: "node npm",
         },
         _ => return None,
     })
@@ -107,8 +127,26 @@ pub(super) fn distro_install_pkgs_cmd(fam: Family, pacotes: &str) -> String {
         (Family::Suse, p) => format!("sudo zypper --non-interactive install -y {p}"),
         (Family::Fedora, p) => format!("sudo dnf install -y {p}"),
         (Family::Arch, p) => format!("sudo pacman -S --noconfirm --needed {p}"),
+        (Family::FreeBsd, p) => pkg_freebsd_cmd(escalador_ou_sudo(), "install", p),
         (Family::Unknown, _) => String::new(),
     }
+}
+
+/// **O quê:** o comando `pkg <verbo> -y <pacotes>` do FreeBSD com o prefixo de elevação dado
+/// (`""` quando já é root). PURA. **Onde:** instalar/remover de [`Family::FreeBsd`] e os testes.
+pub(super) fn pkg_freebsd_cmd(esc: &str, verbo: &str, pacotes: &str) -> String {
+    if esc.is_empty() {
+        format!("pkg {verbo} -y {pacotes}")
+    } else {
+        format!("{esc} pkg {verbo} -y {pacotes}")
+    }
+}
+
+/// **O quê:** o prefixo de elevação do FreeBSD para o comando (`sudo` se nenhum escalador foi
+/// achado — o plano já recusou antes, em [`super::install_recipe`], se não havia saída).
+/// **Onde:** os comandos de [`Family::FreeBsd`].
+fn escalador_ou_sudo() -> &'static str {
+    super::super::detect::escalador().unwrap_or("sudo")
 }
 
 /// **O quê:** os pacotes desta família. Vazio = a linguagem não existe nos repos padrão dela.
@@ -119,6 +157,7 @@ pub(super) fn pkgs_da_familia(fam: Family, p: &DistroPkgs) -> &'static str {
         Family::Suse => p.zypper,
         Family::Fedora => p.dnf,
         Family::Arch => p.arch,
+        Family::FreeBsd => p.freebsd,
         Family::Unknown => "",
     }
 }
@@ -133,6 +172,7 @@ pub(super) fn distro_remove_cmd(fam: Family, pkgs: &DistroPkgs) -> String {
         // `-Rns`: leva as dependências que ficaram órfãs e os arquivos de config do pacote.
         // Sem o `s`, desinstalar deixa um rastro que ninguém depois sabe de onde veio.
         Family::Arch => format!("sudo pacman -Rns --noconfirm {}", pkgs.arch),
+        Family::FreeBsd => pkg_freebsd_cmd(escalador_ou_sudo(), "delete", pkgs.freebsd),
         Family::Unknown => String::new(),
     }
 }
@@ -259,7 +299,8 @@ mod tests_matriz {
     /// nova entrar sem varredura.
     const LINGUAGENS: [&str; 7] = ["go", "rust", "elixir", "csharp", "zig", "ruby", "node"];
 
-    const FAMILIAS: [Family; 4] = [Family::Debian, Family::Suse, Family::Fedora, Family::Arch];
+    const FAMILIAS: [Family; 5] =
+        [Family::Debian, Family::Suse, Family::Fedora, Family::Arch, Family::FreeBsd];
 
     /// **A MATRIZ INTEIRA É DECISÃO CONSCIENTE — 7 × 4 = 28 células, nenhuma por acidente.**
     ///
@@ -314,6 +355,26 @@ mod tests_matriz {
                 }
             }
         }
+    }
+
+    /// **FreeBSD: o `pkg` certo, com e sem elevação.** Root não prefixa; `doas`/`sudo` prefixam.
+    #[test]
+    fn freebsd_usa_pkg_com_a_elevacao_dada() {
+        assert_eq!(pkg_freebsd_cmd("", "install", "go"), "pkg install -y go");
+        assert_eq!(pkg_freebsd_cmd("doas", "install", "node npm"), "doas pkg install -y node npm");
+        assert_eq!(pkg_freebsd_cmd("sudo", "delete", "go"), "sudo pkg delete -y go");
+    }
+
+    /// FreeBSD: os runtimes mapeados e o .NET SEM palpite (vazio -> o plano recusa com saída).
+    #[test]
+    fn freebsd_mapeia_o_confirmado_e_nao_chuta_dotnet() {
+        let pk = |l: &str| pkgs_da_familia(Family::FreeBsd, &distro_pkgs(l).unwrap());
+        assert_eq!(pk("go"), "go");
+        assert_eq!(pk("rust"), "rust");
+        assert_eq!(pk("node"), "node npm");
+        assert_eq!(pk("csharp"), "");
+        assert!(distro_indisponivel("csharp", Family::FreeBsd).is_some());
+        assert!(distro_indisponivel("go", Family::FreeBsd).is_none());
     }
 
     /// **Nome de pacote não tem espaço em branco solto nem vírgula.**

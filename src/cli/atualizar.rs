@@ -65,6 +65,7 @@ pub(crate) fn status_cmd(json: bool) -> Result<(), String> {
     }
     let os_s = match plataforma::os() {
         plataforma::Os::Linux => format!("Linux ({:?})", plataforma::linux_family()),
+        plataforma::Os::FreeBsd => "FreeBSD".to_string(),
         plataforma::Os::Mac => "macOS".to_string(),
         plataforma::Os::Windows => "Windows".to_string(),
     };

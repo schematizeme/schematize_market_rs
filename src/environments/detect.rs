@@ -16,6 +16,9 @@ pub enum Family {
     Suse,
     /// pacman (Arch, Manjaro, EndeavourOS, CachyOS…).
     Arch,
+    /// `pkg` (FreeBSD). Não é Linux: não há `/etc/os-release` garantido, e a elevação é
+    /// `sudo` OU `doas` (ver [`escalador`]).
+    FreeBsd,
     /// não classificada — o método `distro` fica indisponível (deny-by-default).
     Unknown,
 }
@@ -28,13 +31,19 @@ impl Family {
             Family::Fedora => "fedora",
             Family::Suse => "suse",
             Family::Arch => "arch",
+            Family::FreeBsd => "freebsd",
             Family::Unknown => "unknown",
         }
     }
 }
 
-/// Lê `/etc/os-release` do sistema (vazio se ausente) e classifica a família.
+/// **O quê:** a família desta máquina. No FreeBSD é decidida pelo SO compilado (`cfg`), não por
+/// arquivo: ele não garante `/etc/os-release`. Nos demais, lê o os-release (vazio se ausente).
+/// **Onde:** `Machine::probe` e a montagem de todo plano.
 pub fn family() -> Family {
+    if cfg!(target_os = "freebsd") {
+        return Family::FreeBsd;
+    }
     family_from(&std::fs::read_to_string("/etc/os-release").unwrap_or_default())
 }
 
@@ -58,6 +67,11 @@ pub fn family_from(os_release: &str) -> Family {
         }
     }
     let has = |k: &str| tokens.iter().any(|t| t == k);
+    // FreeBSD publica `ID=freebsd` quando há os-release; vem antes de tudo (nenhuma outra
+    // família o cita em ID_LIKE).
+    if has("freebsd") {
+        return Family::FreeBsd;
+    }
     // A ORDEM importa e a razão é concreta: derivadas declaram `ID_LIKE` da mãe, e algumas
     // declaram MAIS DE UMA. Testar a família específica antes da genérica evita classificar
     // um openSUSE como Fedora só porque os dois dizem `rhel`-ish em algum campo.
@@ -87,9 +101,37 @@ pub fn family_from(os_release: &str) -> Family {
     Family::Unknown
 }
 
+/// **O quê:** decide o prefixo de elevação a partir de fatos já medidos. PURA.
+/// `Some("")` = já é root (sem prefixo); `Some("sudo"|"doas")` = o escalador a usar (`sudo` tem
+/// preferência); `None` = sem root e sem escalador — o plano recusa com orientação.
+/// **Onde:** [`escalador`] (mede os fatos) e os testes.
+pub fn escalador_de(is_root: bool, tem_sudo: bool, tem_doas: bool) -> Option<&'static str> {
+    if is_root {
+        Some("")
+    } else if tem_sudo {
+        Some("sudo")
+    } else if tem_doas {
+        Some("doas")
+    } else {
+        None
+    }
+}
+
+/// **O quê:** mede root/`sudo`/`doas` nesta máquina e devolve o prefixo (ver [`escalador_de`]).
+/// **Onde:** os planos de FreeBSD (`pkg` exige root; o FreeBSD base traz `doas` opcional e
+/// `sudo` só por pacote, então nenhum dos dois pode ser presumido).
+pub fn escalador() -> Option<&'static str> {
+    let is_root = util::capture("id", &["-u"]).map(|u| u == "0").unwrap_or(false);
+    escalador_de(
+        is_root,
+        crate::nucleo::bin::binary_in_path("sudo"),
+        crate::nucleo::bin::binary_in_path("doas"),
+    )
+}
+
 /// Um binário está no PATH? (usa `command -v` num shell de login.)
 pub fn has_bin(bin: &str) -> bool {
-    util::run("bash", &["-lc", &format!("command -v {bin}")])
+    util::run(util::login_shell(), &["-lc", &format!("command -v {bin}")])
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false)
 }
@@ -106,7 +148,7 @@ pub fn has_docker() -> bool {
 
 /// O `mise` gerencia (tem instalado) a ferramenta `tool` (ex.: "go", "node")?
 pub fn mise_has(tool: &str) -> bool {
-    util::run("bash", &["-lc", &format!("mise ls --installed {tool} 2>/dev/null")])
+    util::run(util::login_shell(), &["-lc", &format!("mise ls --installed {tool} 2>/dev/null")])
         .map(|s| s.lines().any(|l| !l.trim().is_empty()))
         .unwrap_or(false)
 }
@@ -139,6 +181,22 @@ mod tests_familias {
         assert_eq!(family_from(&osr("fedora", "")), Family::Fedora);
         assert_eq!(family_from(&osr("opensuse-leap", "suse opensuse")), Family::Suse);
         assert_eq!(family_from(&osr("arch", "")), Family::Arch);
+    }
+
+    /// FreeBSD é família própria (`pkg`), nunca cai em Unknown nem em Linux.
+    #[test]
+    fn freebsd_e_familia_propria() {
+        assert_eq!(family_from("NAME=FreeBSD\nID=freebsd\nVERSION_ID=\"14.2\"\n"), Family::FreeBsd);
+        assert_eq!(Family::FreeBsd.label(), "freebsd");
+    }
+
+    /// Elevação: root não prefixa; sudo vence doas; sem nenhum, `None` (o plano recusa).
+    #[test]
+    fn escalador_prefere_root_depois_sudo_depois_doas() {
+        assert_eq!(escalador_de(true, true, true), Some(""));
+        assert_eq!(escalador_de(false, true, true), Some("sudo"));
+        assert_eq!(escalador_de(false, false, true), Some("doas"));
+        assert_eq!(escalador_de(false, false, false), None);
     }
 
     /// **As derivadas** — é o que "e derivados" significa na prática.
