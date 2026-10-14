@@ -41,7 +41,7 @@ pub(crate) enum Cmd {
         /// go|rust|node|… , claude|code|codex, or schematize-deployer|schematize-optimizer|…
         #[arg(required_unless_present = "all")]
         what: Option<String>,
-        /// Install ALL ecosystem apps (deployer, optimizer, database, git, skills, overdev).
+        /// Install ALL ecosystem apps (deployer, optimizer, database, git, skills, overdev) and their windows, plus the market window.
         #[arg(long, conflicts_with = "what")]
         all: bool,
         /// For languages: docker|mise|distro|official. Ignored for tools and apps.

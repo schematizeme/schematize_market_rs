@@ -81,6 +81,15 @@ pub fn avaliar<R: Rede, C: Commits>(rede: &R, commits: &C, e: &Entrada) -> Avali
         };
         return Avaliacao::Instalar(format!("{onde}; instalo em {}", canon.display()));
     }
+    // A janela faz parte do app: CLI em dia sem ela NÃO é "instalado" (kit completo, §37.48).
+    if let Some(g) = e.dest.gui.as_ref().filter(|_| e.assets.is_some_and(|a| a.gui.is_some())) {
+        if !g.is_file() {
+            return Avaliacao::Instalar(format!(
+                "a janela não está instalada ({} não existe)",
+                g.display()
+            ));
+        }
+    }
     let local = match versao::consultar_versao(canon) {
         Ok(v) => v,
         Err(causa) => {
@@ -377,6 +386,51 @@ mod tests {
         let r = rodar(&m, &f, &commits_ok(), Metodo::Binario, false).unwrap();
         assert_eq!(r, Resultado::Instalado(Via::Release("0.1.0".into())));
         assert_eq!(proveniencia(&m.canon), Some(SHA[..12].to_string()), "agora é o release");
+        let _ = std::fs::remove_dir_all(&m.base);
+    }
+
+    /// **Idempotência com janela (v0.4.6):** CLI já no release, mas a janela NÃO está em
+    /// `~/.cargo/bin` -> instala (só o que falta é uma razão para baixar); com a janela
+    /// presente a segunda rodada não baixa nada.
+    #[cfg(unix)]
+    #[test]
+    fn cli_em_dia_sem_a_janela_instala_e_na_segunda_rodada_nao_baixa() {
+        let mut m = mundo("sem-janela");
+        let gui = m.canon.with_file_name("schematize-overdev-gui");
+        m.dest.gui = Some(gui.clone());
+        script(&m.canon, "0.1.0", Some(&SHA[..12]));
+        let a = Assets {
+            cli: format!("{BIN}-linux-x86_64"),
+            gui: Some(format!("{BIN}-gui-linux-x86_64")),
+        };
+        let e = Entrada {
+            repo: REPO,
+            bin: BIN,
+            assets: Some(&a),
+            dest: &m.dest,
+            metodo: Metodo::Binario,
+            fora: None,
+        };
+        let canon = m.canon.clone();
+        let rodar = |f: &Falsa| {
+            instalar_com(
+                f,
+                &commits_ok(),
+                &e,
+                &m.amb,
+                &|_| alvo_de(&canon),
+                false,
+                |_| true,
+                || panic!("sem fonte"),
+            )
+            .unwrap()
+        };
+        let f1 = Falsa::release("0.1.0");
+        assert_eq!(rodar(&f1), Resultado::Instalado(Via::Release("0.1.0".into())));
+        assert!(gui.is_file(), "a janela tinha de ser instalada");
+        let f2 = Falsa::release("0.1.0");
+        assert_eq!(rodar(&f2), Resultado::JaInstalado { versao: "0.1.0".into() });
+        assert!(f2.baixados.borrow().is_empty(), "2ª rodada não reinstala");
         let _ = std::fs::remove_dir_all(&m.base);
     }
 

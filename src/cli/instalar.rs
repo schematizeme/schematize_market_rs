@@ -11,6 +11,7 @@
 
 use market::appsdacasa::{externo, instalar_app_da_casa, registrar_no_menu, EXTERNOS};
 use market::atualizar::instalacao::Resultado;
+use market::atualizar::kit::{self, AcaoMarket, Desfecho};
 use market::environments;
 use market::nucleo::i18n::{t, tf};
 
@@ -26,7 +27,7 @@ pub(crate) fn install_cmd(
 ) -> Result<(), String> {
     match (what, all) {
         (_, true) => instalar_todos(dry_run, yes),
-        (Some(w), false) if externo(w).is_some() => instalar_app(w, dry_run, yes),
+        (Some(w), false) if externo(w).is_some() => instalar_app(w, dry_run, yes).map(|_| ()),
         (Some(w), false) => environments::install(w, method, dry_run, yes),
         (None, false) => Err(t("install.what_missing")),
     }
@@ -38,12 +39,16 @@ fn conjunto_completo() -> Vec<&'static str> {
     EXTERNOS.iter().map(|a| a.bin).collect()
 }
 
-/// **O quê:** instala todos os apps do ecossistema, pedindo UM consentimento (ou `-y`). Cada
-/// app é independente: a falha de um não impede os outros, e o erro sobe no fim (exit != 0).
+/// **O quê:** instala o KIT COMPLETO — os apps da tabela [`EXTERNOS`] (CLI + janela de cada um)
+/// e o próprio market com a janela dele — na última versão, pedindo UM consentimento (ou `-y`).
+/// Idempotente: o que já está na última (com janela) não é refeito; o que está velho atualiza.
+/// Cada item é independente: a falha de um não impede os outros; no fim vem o Resumo e, se algo
+/// falhou, o erro (exit != 0) com o que fazer.
 ///
 /// **Onde:** [`install_cmd`] com `--all` — o que a dica do `update` numa máquina limpa manda rodar.
 fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
-    let nomes = conjunto_completo();
+    let mut nomes = conjunto_completo();
+    nomes.push(MARKET);
     println!(
         "{}",
         tf("install.all_intro", &[("n", &nomes.len().to_string()), ("apps", &nomes.join(", "))])
@@ -52,17 +57,68 @@ fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
         println!("{}", t("install.cancelled"));
         return Ok(());
     }
-    let mut falhas = Vec::new();
-    for n in &nomes {
-        if let Err(e) = instalar_app(n, dry_run, true) {
+    let mut itens: Vec<(String, Desfecho)> = Vec::new();
+    for n in conjunto_completo() {
+        let d = instalar_app(n, dry_run, true).unwrap_or_else(|e| {
             eprintln!("{}", tf("install.all_error", &[("app", n), ("error", &e)]));
-            falhas.push(*n);
-        }
+            Desfecho::Falhou(e)
+        });
+        itens.push((n.to_string(), d));
     }
-    if falhas.is_empty() {
-        Ok(())
-    } else {
-        Err(tf("install.all_failed", &[("apps", &falhas.join(", "))]))
+    let d = instalar_market(dry_run).unwrap_or_else(|e| {
+        eprintln!("{}", tf("install.all_error", &[("app", MARKET), ("error", &e)]));
+        Desfecho::Falhou(e)
+    });
+    itens.push((MARKET.to_string(), d));
+    print!("{}", kit::resumo(&itens));
+    kit::veredito(&itens)
+}
+
+/// O nome do próprio gestor no resumo do `install --all`.
+const MARKET: &str = "schematize-market";
+
+/// **O quê:** mantém o PRÓPRIO market e a janela dele no `install --all`: self-update se há
+/// versão nova (que já traz a janela), ou só a janela quando o CLI está em dia e ela falta.
+/// **Onde:** [`instalar_todos`], depois dos apps.
+fn instalar_market(dry_run: bool) -> Result<Desfecho, String> {
+    use market::atualizar::{alvo, selfupdate, APPS_GERIDOS};
+    let app = APPS_GERIDOS
+        .iter()
+        .find(|a| a.bin == MARKET)
+        .ok_or("o market não está na tabela de apps geridos")?;
+    let publicada = match alvo::alvo_de(app.repo) {
+        alvo::Alvo::Versao(v) | alvo::Alvo::SemAsset { versao: v } => Ok(v),
+        alvo::Alvo::Indisponivel(e) => Err(e),
+    };
+    let acao = kit::decidir_market(
+        env!("CARGO_PKG_VERSION"),
+        publicada.as_deref().map_err(String::as_str),
+        app.janela_ausente(),
+    );
+    match &acao {
+        AcaoMarket::AtualizarCli(v) => {
+            println!("→ {MARKET}: atualizando para v{v} (com a janela).")
+        }
+        AcaoMarket::SoJanela(v) => println!("→ {MARKET}: a janela falta — instalando a da v{v}."),
+        AcaoMarket::EmDia => println!("{MARKET} e a janela dele já estão em dia."),
+        AcaoMarket::Impossivel(_) => {}
+    }
+    match acao {
+        AcaoMarket::EmDia => Ok(Desfecho::EmDia),
+        AcaoMarket::Impossivel(causa) => Err(format!(
+            "não consegui saber a última versão do market ({causa}). Nada foi alterado; \
+             tente de novo em alguns minutos."
+        )),
+        _ if dry_run => Ok(Desfecho::NadaFeito),
+        AcaoMarket::AtualizarCli(v) => {
+            selfupdate::atualizar_a_si_mesmo(Some(&v), alvo::metodo_de(app.repo))?;
+            Ok(Desfecho::Atualizado)
+        }
+        AcaoMarket::SoJanela(v) => {
+            selfupdate::instalar_janela_do_market(&v)?;
+            println!("✓ {}", market::nucleo::plataforma::gestor_gui_bin());
+            Ok(Desfecho::Instalado)
+        }
     }
 }
 
@@ -95,7 +151,7 @@ pub(crate) fn remove_cmd(
 /// **O que mudou no ADR-0013:** isto executava `curl -fsSL <install.sh> | bash -s -- --flag`.
 /// Agora o market instala ele mesmo ([`crate::appsdacasa::instalar_app_da_casa`]): release primeiro, fonte só sem binário — e porque o
 /// `install.sh` passou a delegar para cá: manter o `curl` faria os dois se chamarem em círculo.
-fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
+fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<Desfecho, String> {
     // Deny-by-default: só o que está na tabela. Nome desconhecido não vira alvo de build.
     let Some(a) = externo(nome) else {
         let nomes: Vec<&str> = EXTERNOS.iter().map(|x| x.bin).collect();
@@ -120,6 +176,7 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
             }
         }
     };
+    let existia = market::atualizar::APPS_GERIDOS.iter().any(|x| x.bin == a.bin && x.instalado());
     let resultado = instalar_app_da_casa(a.bin, dry_run, banner)?;
     // Sem terminal e sem `-y`: não é cancelamento da pessoa, é falta de como perguntar.
     if let Some(m) = sem_terminal.take() {
@@ -129,13 +186,14 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
         Resultado::JaInstalado { .. } => {
             println!("Para atualizar, rode:");
             println!("    schematize-market update");
-            return Ok(());
+            return Ok(Desfecho::EmDia);
         }
         Resultado::Cancelado => {
             println!("{}", t("install.cancelled"));
-            return Ok(());
+            return Ok(Desfecho::NadaFeito);
         }
-        Resultado::NaoConfirmado { .. } | Resultado::SoSimulou => return Ok(()),
+        Resultado::NaoConfirmado { .. } => return Ok(Desfecho::NaoConfirmado),
+        Resultado::SoSimulou => return Ok(Desfecho::NadaFeito),
         Resultado::Instalado(_) => {}
     }
     registrar_no_menu(a.bin);
@@ -154,13 +212,15 @@ fn instalar_app(nome: &str, dry_run: bool, yes: bool) -> Result<(), String> {
                 println!("\n{aviso}");
             }
         }
-        None => println!(
-            "\nO build terminou, mas o `{}` ainda não responde. Rode \
-             `schematize-market list` para ver o estado.",
-            a.bin
-        ),
+        None => {
+            return Err(format!(
+                "o build terminou, mas o `{}` ainda não responde. Rode \
+                 `schematize-market list` para ver o estado.",
+                a.bin
+            ));
+        }
     }
-    Ok(())
+    Ok(if existia { Desfecho::Atualizado } else { Desfecho::Instalado })
 }
 
 #[cfg(test)]
@@ -186,6 +246,8 @@ mod tests {
     /// `--all` cobre exatamente os 6 apps do ecossistema, todos instaláveis pelo nome.
     #[test]
     fn all_cobre_os_seis_apps_do_ecossistema() {
+        // E o kit completo soma o próprio market (CLI + janela) — ver `instalar_todos`.
+        assert_eq!(MARKET, "schematize-market");
         let n = conjunto_completo();
         assert_eq!(n.len(), 6, "{n:?}");
         for b in ["deployer", "optimizer", "database", "git", "skills", "overdev"] {

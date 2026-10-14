@@ -30,6 +30,7 @@ pub mod divergencia;
 pub mod exibir;
 pub mod fonte;
 pub mod instalacao;
+pub mod kit;
 pub mod limpeza;
 pub mod metodo;
 pub mod purga;
@@ -104,7 +105,7 @@ pub struct AppGerido {
     /// É a mesma forma do defeito que custou o `v0.2.0` do market: o passo verde, o asset
     /// ausente, e nada no meio dizendo qual dos dois é a verdade.
     ///
-    /// `None` para deployer e optimizer, cujas janelas têm repo próprio e esteira própria.
+    /// `None` só para o market, cuja janela é instalada pelo self-update ([`selfupdate`]).
     pub gui: Option<&'static str>,
 }
 
@@ -128,6 +129,18 @@ impl AppGerido {
         let nome = format!("{g}{}", plataforma::exe_suffix());
         let dst = plataforma::install_dir().join(&nome);
         Some((nome, dst))
+    }
+
+    /// **O quê:** a janela deste app existe no catálogo mas NÃO está em `~/.cargo/bin`? Para o
+    /// market (que não declara `gui` na tabela) olha a `schematize-market-gui`. PURA (só `stat`).
+    ///
+    /// **Onde:** [`componentes::atualizar_componente`] e o `install --all`: CLI em dia sem a
+    /// janela não é "em dia" — o kit tem de estar completo.
+    pub fn janela_ausente(&self) -> bool {
+        if self.politica == Politica::Sempre {
+            return !plataforma::install_dir().join(plataforma::gestor_gui_bin()).is_file();
+        }
+        self.gui_nome_e_destino().is_some_and(|(_, dst)| !dst.is_file())
     }
 
     /// **O quê:** o caminho do binário com o nome ANTIGO, se este app foi renomeado.
@@ -179,8 +192,8 @@ pub const APPS_GERIDOS: &[AppGerido] = &[
         politica: Politica::SeInstalado,
         // Chamou-se `deployer` até o commit `0fa0112`; o ADR-0012 pôs o prefixo da casa.
         legado: Some("deployer"),
-        // A janela do deployer tem repo próprio — ela não sai deste build.
-        gui: None,
+        // A janela sai do MESMO release (`schematize-deployer-gui-<os>-<arch>`, v0.9.0+).
+        gui: Some("schematize-deployer-gui"),
     },
     AppGerido {
         bin: "schematize-optimizer",
@@ -188,7 +201,8 @@ pub const APPS_GERIDOS: &[AppGerido] = &[
         sobre: "mede o ambiente de dev e põe cada software no seu teto de recurso",
         politica: Politica::SeInstalado,
         legado: None,
-        gui: None,
+        // A janela sai do MESMO release (`schematize-optimizer-gui-<os>-<arch>`, v0.4.0+).
+        gui: Some("schematize-optimizer-gui"),
     },
     AppGerido {
         bin: "schematize-database",
@@ -561,7 +575,7 @@ mod tests {
         }
         // Self-check: hoje há exatamente um app assim. Zero significaria que o laço não mediu
         // nada — e um teste que roda zero vezes passa sempre.
-        assert_eq!(com_janela, 4, "mudou o nº de apps com janela no mesmo repo — reveja");
+        assert_eq!(com_janela, 6, "mudou o nº de apps com janela no mesmo repo — reveja");
     }
 
     /// **O BUG MEDIDO, lado (b):** o nome do binário na tabela é o `[[bin]]` do Cargo.toml de

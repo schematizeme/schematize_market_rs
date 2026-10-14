@@ -119,6 +119,14 @@ pub(super) fn atualizar_componente(app: &AppGerido, force: bool) {
         }
         _ => {}
     }
+    // CLI em dia (ou à frente) mas SEM a janela: completa o par antes de dizer "em dia".
+    if !force && ver != Veredito::Atualizar && app.janela_ausente() {
+        if let alvo::Alvo::Versao(v) = &alvo {
+            if completar_janela(app, v) {
+                return;
+            }
+        }
+    }
     if let (false, Veredito::AFrente, Some(pub_)) = (force, ver, ultima.as_deref()) {
         exibir::avisar_a_frente(app.bin, instalada.as_deref(), pub_);
         limpar_versoes_antigas(app);
@@ -244,6 +252,34 @@ pub(super) fn veredito_com_build(ver: Veredito, build: Option<&Decisao>) -> Vere
         (Veredito::EmDia, Some(Decisao::Reinstalar(_))) => Veredito::Atualizar,
         (v, _) => v,
     }
+}
+
+/// **O quê:** instala só o que falta — a janela — de um app cujo CLI já está em dia. `true` =
+/// o componente foi tratado por inteiro (o chamador encerra); `false` = segue o fluxo normal.
+///
+/// **Onde:** [`atualizar_componente`], quando [`AppGerido::janela_ausente`].
+///
+/// O market baixa só a janela da versão publicada. Os outros apps, instalados por binário,
+/// refazem o par do release; quem compilou do fonte recebe o aviso (não vira build implícito).
+fn completar_janela(app: &AppGerido, versao: &str) -> bool {
+    println!("→ {}: a janela não está instalada — instalando a do release v{versao}.", app.bin);
+    if app.politica == Politica::Sempre {
+        match selfupdate::instalar_janela_do_market(versao) {
+            Ok(()) => println!("✓ {}", plataforma::gestor_gui_bin()),
+            Err(e) => println!("aviso: {}: não consegui instalar a janela: {e}", app.bin),
+        }
+        return false;
+    }
+    if alvo::metodo_de(app.repo) == alvo::Metodo::Binario {
+        atualizar_por_release(app, versao);
+        return true;
+    }
+    println!(
+        "aviso: {}: foi compilado do fonte e está sem a janela; para trazê-la do release rode \
+         `schematize-market install {}`.",
+        app.bin, app.bin
+    );
+    false
 }
 
 /// **O quê:** por onde um componente (não-market) se atualiza.

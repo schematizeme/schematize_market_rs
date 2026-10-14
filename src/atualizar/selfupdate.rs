@@ -68,6 +68,7 @@ pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result
                 r?;
                 super::metodo::registrar(plataforma::MARKET_REPO, Metodo::Binario);
                 println!("✓ schematize-market atualizado para v{alvo} (binário pré-compilado).");
+                avisar_janela(alvo);
                 return Ok(());
             }
             // D7: quem instalou por binário não cai num build implícito (sudo sem terminal).
@@ -84,6 +85,63 @@ pub fn atualizar_a_si_mesmo(versao_alvo: Option<&str>, metodo: Metodo) -> Result
     }
 
     compilar_e_trocar(&eu, alvo)
+}
+
+/// **O quê:** instala a JANELA do market (`schematize-market-gui`) baixando o asset `asset` do
+/// release `v<versao>` para `destino`. Não executa a janela (abriria uma tela): vale o download
+/// íntegro (não vazio), o `chmod` e o rename atômico. `Err` com a causa se falhar.
+///
+/// **Onde:** [`instalar_janela_do_market`] (produção, rede real) e a suíte (rede falsa).
+///
+/// **Por que existe (v0.4.6):** o self-update trocava só o CLI; a janela do market, publicada no
+/// mesmo release, nunca chegava a `~/.cargo/bin` — a máquina ficava sem a janela do gestor
+/// mesmo "atualizada".
+pub fn instalar_janela_com<R: super::release::Rede>(
+    rede: &R,
+    asset: &str,
+    versao: &str,
+    destino: &Path,
+) -> Result<(), String> {
+    binario::garante_diretorio_pai(destino)?;
+    let tmp = destino.with_file_name(format!("{}.baixado", nome_do_arquivo(destino)));
+    let _ = std::fs::remove_file(&tmp);
+    let url = rede::url_de_asset(plataforma::MARKET_REPO, &format!("v{versao}"), asset);
+    if !rede.baixar(&url, &tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("não consegui baixar {asset} (v{versao}) de {url}"));
+    }
+    let vazio = std::fs::metadata(&tmp).map(|m| m.len() == 0).unwrap_or(true);
+    if vazio {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(format!("o download de {asset} (v{versao}) veio vazio"));
+    }
+    binario::make_executable(&tmp);
+    let r = binario::place(&tmp, destino);
+    let _ = std::fs::remove_file(&tmp);
+    r
+}
+
+/// **O quê:** instala a janela do market da `versao` publicada em `~/.cargo/bin`. `Err` se esta
+/// plataforma não tem asset ou o download falhar. **Onde:** o self-update, o `update`
+/// ([`super::componentes`]) e o `install --all`.
+pub fn instalar_janela_do_market(versao: &str) -> Result<(), String> {
+    let asset = plataforma::gestor_gui_asset_name()
+        .ok_or("esta plataforma não tem a janela do market pré-compilada")?;
+    let destino = plataforma::install_dir().join(plataforma::gestor_gui_bin());
+    instalar_janela_com(&super::release::RedeReal, &asset, versao, &destino)
+}
+
+/// **O quê:** [`instalar_janela_do_market`] sem derrubar quem chama: o CLI JÁ foi trocado, então
+/// falhar aqui vira aviso DITO com a causa e como repetir (nunca silêncio). **Onde:** o fim do
+/// self-update.
+fn avisar_janela(versao: &str) {
+    match instalar_janela_do_market(versao) {
+        Ok(()) => println!("✓ {}", plataforma::gestor_gui_bin()),
+        Err(e) => println!(
+            "aviso: o schematize-market está atualizado, mas a janela não: {e}\n  \
+             Repita com: schematize-market update"
+        ),
+    }
 }
 
 /// **O quê:** baixa o asset do market para um temporário AO LADO do binário atual.
@@ -128,6 +186,7 @@ fn compilar_e_trocar(eu: &Path, alvo: &str) -> Result<(), String> {
     r?;
     super::metodo::registrar(plataforma::MARKET_REPO, Metodo::Fonte);
     println!("✓ schematize-market atualizado para v{alvo} (compilado do fonte).");
+    avisar_janela(alvo);
     Ok(())
 }
 
@@ -429,5 +488,56 @@ mod tests {
         }
         assert!(velho_intacto(&velho), "a varredura não pode tocar no binário de verdade");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Rede falsa mínima: serve (ou nega) o download da janela.
+    struct RedeJanela {
+        entrega: bool,
+        corpo: &'static [u8],
+        pediu: std::cell::RefCell<Vec<String>>,
+    }
+    impl super::super::release::Rede for RedeJanela {
+        fn ultimo_release(&self, _: &str) -> Result<String, (rede::Causa, String)> {
+            Err((rede::Causa::Unexpected, "não usada".into()))
+        }
+        fn asset_existe(&self, _: &str) -> Result<bool, String> {
+            Ok(self.entrega)
+        }
+        fn baixar(&self, url: &str, dest: &Path) -> bool {
+            self.pediu.borrow_mut().push(url.to_string());
+            self.entrega && std::fs::write(dest, self.corpo).is_ok()
+        }
+    }
+
+    /// **v0.4.6:** o market traz a JANELA do mesmo release — baixa o asset certo, grava
+    /// executável ao lado do CLI e não deixa temporário.
+    #[test]
+    fn janela_do_market_e_baixada_do_release_e_instalada() {
+        let (d, _) = sandbox("janela-ok");
+        let dst = d.join("schematize-market-gui");
+        let r = RedeJanela { entrega: true, corpo: b"janela", pediu: Default::default() };
+        instalar_janela_com(&r, "schematize-market-gui-linux-x86_64", "0.4.5", &dst).unwrap();
+        assert_eq!(std::fs::read(&dst).unwrap(), b"janela");
+        let url = r.pediu.borrow()[0].clone();
+        assert!(url.ends_with("/v0.4.5/schematize-market-gui-linux-x86_64"), "{url}");
+        assert!(url.contains("schematize_market_rs"), "{url}");
+        assert!(!d.join("schematize-market-gui.baixado").exists(), "sobrou temporário");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// Download que falha ou vem vazio é `Err` dito, e uma janela anterior NÃO é destruída.
+    #[test]
+    fn janela_do_market_que_falha_ou_vem_vazia_e_err_e_preserva_a_anterior() {
+        for (entrega, corpo) in [(false, &b"x"[..]), (true, &b""[..])] {
+            let (d, _) = sandbox("janela-ruim");
+            let dst = d.join("schematize-market-gui");
+            std::fs::write(&dst, b"antiga").unwrap();
+            let r = RedeJanela { entrega, corpo, pediu: Default::default() };
+            let e = instalar_janela_com(&r, "schematize-market-gui-linux-x86_64", "0.4.5", &dst)
+                .unwrap_err();
+            assert!(e.contains("schematize-market-gui-linux-x86_64"), "{e}");
+            assert_eq!(std::fs::read(&dst).unwrap(), b"antiga");
+            let _ = std::fs::remove_dir_all(&d);
+        }
     }
 }

@@ -566,6 +566,33 @@ mod tests {
         assert!(r.unwrap_err().contains("baixar"));
     }
 
+    /// **O kit completo (v0.4.6): deployer e optimizer TRAZEM a janela.** Com os nomes de asset
+    /// que os releases reais publicam (`schematize-<app>-gui-linux-x86_64`), o `install` por
+    /// release baixa o par e deixa `schematize-<app>-gui` ao lado do headless. Antes a tabela
+    /// dizia `gui: None` e a janela nunca saía do release — o defeito medido nesta máquina.
+    #[cfg(unix)]
+    #[test]
+    fn deployer_e_optimizer_instalam_a_janela_do_release() {
+        for bin in ["schematize-deployer", "schematize-optimizer"] {
+            let app = crate::atualizar::APPS_GERIDOS.iter().find(|a| a.bin == bin).unwrap();
+            let a = assets_para(app.bin, app.gui, Os::Linux, "x86_64").unwrap();
+            assert_eq!(a.gui.as_deref(), Some(format!("{bin}-gui-linux-x86_64").as_str()), "{bin}");
+            let f = Falsa::com_release("0.1.0", &[a.cli.as_str(), a.gui.as_deref().unwrap()]);
+            let base =
+                std::env::temp_dir().join(format!("market-kit-{bin}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&base);
+            let d = Destino {
+                cli: base.join("bin").join(bin),
+                gui: Some(base.join("bin").join(format!("{bin}-gui"))),
+                tmp: base.join("dl"),
+            };
+            let via = instalar_ou_fonte(&f, REPO, Some(&a), &d, || panic!("sem fonte")).unwrap();
+            assert_eq!(via, Via::Release("0.1.0".into()));
+            assert!(d.gui.as_ref().unwrap().is_file(), "{bin}: a janela não foi instalada");
+            let _ = std::fs::remove_dir_all(&base);
+        }
+    }
+
     /// Envolve a [`Falsa`] negando todo download.
     struct FalsaSemDownload(Falsa);
     impl Rede for FalsaSemDownload {
