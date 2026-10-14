@@ -11,7 +11,8 @@
 //! mantém pelo mesmo motivo: este é o caminho que INSTALA o resto. Uma árvore de dependências
 //! de TLS aqui significa que o gestor de pacotes só compila onde essa árvore compila — e o
 //! único componente que precisa funcionar em toda máquina passa a ser o mais frágil de todos.
-//! `curl` já está em toda instalação Unix, e no Windows desde a build 17063.
+//! `curl` já está em toda instalação Unix (exceto o FreeBSD base, que traz `fetch(1)` — usado
+//! no lugar quando não há curl, ver [`cliente`]), e no Windows desde a build 17063.
 
 use super::util;
 use std::path::Path;
@@ -20,6 +21,76 @@ use std::path::Path;
 /// "sem internet" seria o diagnóstico errado para esse 403.
 const UA: &str = "User-Agent: schematize-market";
 
+/// Cliente HTTP de linha de comando. `Fetch` é o `fetch(1)` do FreeBSD base — só entra quando o
+/// SO é FreeBSD e NÃO há `curl` (o base não traz curl; quem usa não precisa saber disso).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cliente {
+    Curl,
+    Fetch,
+}
+
+/// **O quê:** escolhe o cliente a partir de fatos já medidos. PURA. `Fetch` só no FreeBSD sem
+/// curl; em qualquer outro caso, `Curl` (inclusive no FreeBSD COM curl).
+/// **Onde:** [`cliente`] e os testes.
+pub fn escolher_cliente(freebsd: bool, tem_curl: bool) -> Cliente {
+    if freebsd && !tem_curl {
+        Cliente::Fetch
+    } else {
+        Cliente::Curl
+    }
+}
+
+/// **O quê:** o cliente a usar NESTA máquina (mede o SO compilado e o PATH).
+/// **Onde:** todo download/leitura deste módulo e os bootstraps (`rustup`).
+pub fn cliente() -> Cliente {
+    escolher_cliente(cfg!(target_os = "freebsd"), super::bin::binary_in_path("curl"))
+}
+
+/// **O quê:** o trecho de shell que escreve o corpo de `url` na saída padrão, pra ir num
+/// `| sh`: `curl … <url>` ou `fetch -o - <url>`. PURA.
+/// **Onde:** os bootstraps `curl … | sh` (rustup) que rodam também no FreeBSD.
+pub fn baixar_para_pipe(cli: Cliente, url: &str) -> String {
+    match cli {
+        Cliente::Curl => format!("curl --proto '=https' --tlsv1.2 -sSf {url}"),
+        Cliente::Fetch => format!("fetch -o - {url}"),
+    }
+}
+
+/// **O quê:** argv do `fetch` pra ler texto (`-o -`, sem barra de progresso, timeout 20s). PURA.
+/// **Onde:** [`get_text`] e a leitura do release no FreeBSD sem curl.
+pub fn fetch_texto_args(url: &str) -> Vec<String> {
+    ["-q", "-T", "20", "-o", "-", url].iter().map(|s| s.to_string()).collect()
+}
+
+/// **O quê:** argv do `fetch` pra gravar `url` em `dest` (`-o <arquivo> <url>`). PURA.
+/// **Onde:** [`download`] no FreeBSD sem curl.
+pub fn fetch_download_args(dest: &str, url: &str) -> Vec<String> {
+    ["-o", dest, url].iter().map(|s| s.to_string()).collect()
+}
+
+/// **O quê:** traduz o resultado de um `fetch` de sonda no código HTTP que o resto do módulo
+/// já sabe classificar (`200`, `404`, `403`, `000`). PURA.
+/// **Onde:** [`asset_existe`] e [`url_do_ultimo_release_tipado`] no modo `Fetch`.
+pub fn http_de_fetch(res: &Result<String, String>) -> &'static str {
+    match res {
+        Ok(_) => "200",
+        Err(e) if e.contains("404") || e.contains("Not Found") => "404",
+        Err(e) if e.contains("403") || e.contains("429") => "403",
+        Err(_) => "000",
+    }
+}
+
+/// **O quê:** tira de uma página de release do GitHub o `href` do `rel="canonical"` (que, para
+/// `/releases/latest`, é a URL da tag). PURA.
+/// **Onde:** [`url_do_ultimo_release_tipado`] no modo `Fetch` (o `fetch` não expõe o redirect).
+pub fn canonical_da_pagina(html: &str) -> Option<String> {
+    let i = html.find("rel=\"canonical\"")?;
+    let resto = &html[i..];
+    let j = resto.find("href=\"")? + 6;
+    let fim = resto[j..].find('"')?;
+    Some(resto[j..j + fim].to_string())
+}
+
 /// **O quê:** lê o corpo de `url` como texto. `None` se falhar (rede fora, HTTP >= 400).
 /// Timeout curto — um `status` que pendura por minutos é pior que um que diz "não sei".
 ///
@@ -27,6 +98,10 @@ const UA: &str = "User-Agent: schematize-market";
 pub fn get_text(url: &str) -> Option<String> {
     #[cfg(not(windows))]
     {
+        if cliente() == Cliente::Fetch {
+            let a = fetch_texto_args(url);
+            return util::capture("fetch", &a.iter().map(String::as_str).collect::<Vec<_>>());
+        }
         util::capture("curl", &["-fsSL", "-m", "20", "-H", UA, url])
     }
     #[cfg(windows)]
@@ -50,6 +125,11 @@ pub fn get_text(url: &str) -> Option<String> {
 pub fn get_text_com_cabecalho(url: &str, cabecalho: &str) -> Option<String> {
     #[cfg(not(windows))]
     {
+        // O `fetch` não envia cabeçalho arbitrário: sem curl esta consulta (só usada quando
+        // não há `git`) devolve `None`, e o chamador já diz a causa.
+        if cliente() == Cliente::Fetch {
+            return None;
+        }
         util::capture("curl", &["-fsSL", "-m", "20", "-H", UA, "-H", cabecalho, url])
     }
     #[cfg(windows)]
@@ -73,6 +153,11 @@ pub fn download(url: &str, dest: &Path) -> bool {
     };
     #[cfg(not(windows))]
     {
+        if cliente() == Cliente::Fetch {
+            let a = fetch_download_args(dest_s, url);
+            let a: Vec<&str> = a.iter().map(String::as_str).collect();
+            return util::run_inherit("fetch", &a).is_ok() && dest.is_file();
+        }
         util::run_inherit("curl", &["-fSL", "-o", dest_s, url]).is_ok() && dest.is_file()
     }
     #[cfg(windows)]
@@ -142,21 +227,30 @@ pub fn url_do_ultimo_release(repo: &str) -> Result<String, String> {
 pub fn url_do_ultimo_release_tipado(repo: &str) -> Result<String, (Causa, String)> {
     let url = format!("https://github.com/{repo}/releases/latest");
     #[cfg(not(windows))]
-    let saida = util::capture(
-        "curl",
-        &[
-            "-sS",
-            "-m",
-            "20",
-            "-H",
-            UA,
-            "-o",
-            "/dev/null",
-            "-w",
-            "%{http_code} %{redirect_url}",
-            &url,
-        ],
-    );
+    let saida = if cliente() == Cliente::Fetch {
+        let a = fetch_texto_args(&url);
+        let r = util::run("fetch", &a.iter().map(String::as_str).collect::<Vec<_>>());
+        match (&r, http_de_fetch(&r)) {
+            (Ok(html), _) => canonical_da_pagina(html).map(|u| format!("302 {u}")),
+            (_, cod) => Some(format!("{cod} ")),
+        }
+    } else {
+        util::capture(
+            "curl",
+            &[
+                "-sS",
+                "-m",
+                "20",
+                "-H",
+                UA,
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code} %{redirect_url}",
+                &url,
+            ],
+        )
+    };
     #[cfg(windows)]
     let saida = {
         let ps = format!(
@@ -284,10 +378,28 @@ pub fn classificar_http_do_asset(saida: &str) -> Result<bool, String> {
 /// vem por `-w` e a sonda não escreve nada no terminal da pessoa.
 pub fn asset_existe(url: &str) -> Result<bool, String> {
     #[cfg(not(windows))]
-    let saida = util::capture(
-        "curl",
-        &["-sSL", "-m", "20", "-H", UA, "-r", "0-0", "-o", "/dev/null", "-w", "%{http_code}", url],
-    );
+    let saida = if cliente() == Cliente::Fetch {
+        // `-s`: só confere (tamanho) sem baixar o corpo; o erro traz o motivo (404 etc.).
+        Some(http_de_fetch(&util::run("fetch", &["-s", "-T", "20", url])).to_string())
+    } else {
+        util::capture(
+            "curl",
+            &[
+                "-sSL",
+                "-m",
+                "20",
+                "-H",
+                UA,
+                "-r",
+                "0-0",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                url,
+            ],
+        )
+    };
     #[cfg(windows)]
     let saida = {
         let ps = format!(
@@ -302,6 +414,46 @@ pub fn asset_existe(url: &str) -> Result<bool, String> {
 
 #[cfg(test)]
 mod tests {
+    /// FreeBSD sem curl usa `fetch`; com curl, ou em qualquer outro SO, segue no curl.
+    #[test]
+    fn cliente_fetch_so_no_freebsd_sem_curl() {
+        assert_eq!(escolher_cliente(true, false), Cliente::Fetch);
+        assert_eq!(escolher_cliente(true, true), Cliente::Curl);
+        assert_eq!(escolher_cliente(false, false), Cliente::Curl);
+        assert_eq!(escolher_cliente(false, true), Cliente::Curl);
+    }
+
+    /// Os comandos do `fetch` são os do pedido: `-o - <url>` e `-o <arquivo> <url>`.
+    #[test]
+    fn comandos_do_fetch() {
+        assert_eq!(baixar_para_pipe(Cliente::Fetch, "https://x/y"), "fetch -o - https://x/y");
+        assert!(baixar_para_pipe(Cliente::Curl, "https://x/y").starts_with("curl "));
+        let t = fetch_texto_args("https://x/y");
+        assert!(t.windows(2).any(|w| w == ["-o", "-"]) && t.last().unwrap() == "https://x/y");
+        assert_eq!(fetch_download_args("/tmp/a", "https://x/y"), ["-o", "/tmp/a", "https://x/y"]);
+    }
+
+    /// A sonda por `fetch` cai nos MESMOS códigos HTTP que o resto classifica.
+    #[test]
+    fn sonda_do_fetch_vira_codigo_http() {
+        assert_eq!(http_de_fetch(&Ok(String::new())), "200");
+        assert_eq!(http_de_fetch(&Err("fetch: https://x: Not Found".into())), "404");
+        assert_eq!(http_de_fetch(&Err("fetch: https://x: Forbidden 403".into())), "403");
+        assert_eq!(http_de_fetch(&Err("fetch: sem rota".into())), "000");
+        assert_eq!(classificar_http_do_asset(http_de_fetch(&Ok(String::new()))), Ok(true));
+    }
+
+    /// A URL da tag sai do `rel="canonical"` da página do release.
+    #[test]
+    fn canonical_da_pagina_acha_a_tag() {
+        let html = r#"<head><link rel="canonical" href="https://github.com/o/r/releases/tag/v1.2.3"></head>"#;
+        assert_eq!(
+            canonical_da_pagina(html).as_deref(),
+            Some("https://github.com/o/r/releases/tag/v1.2.3")
+        );
+        assert_eq!(canonical_da_pagina("<html></html>"), None);
+    }
+
     #[test]
     fn causa_do_redirect_e_tipada_com_slug_estavel() {
         let r = "schematizeme/x";

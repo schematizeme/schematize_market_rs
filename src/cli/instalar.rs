@@ -13,7 +13,7 @@ use market::appsdacasa::{externo, instalar_app_da_casa, registrar_no_menu, EXTER
 use market::atualizar::instalacao::Resultado;
 use market::atualizar::kit::{self, AcaoMarket, Desfecho};
 use market::atualizar::selfupdate;
-use market::environments;
+use market::environments::{self, DesfechoFerramenta};
 use market::nucleo::i18n::{t, tf};
 
 /// **O quê:** instala um app da casa, uma linguagem ou uma ferramenta de dev — ou, com
@@ -45,8 +45,12 @@ fn conjunto_completo() -> Vec<&'static str> {
     EXTERNOS.iter().map(|a| a.bin).collect()
 }
 
-/// **O quê:** instala o KIT COMPLETO — os apps da tabela [`EXTERNOS`] (CLI + janela de cada um)
-/// e o próprio market com a janela dele — na última versão, pedindo UM consentimento (ou `-y`).
+/// **O quê:** as ferramentas de IA que o `install --all` também instala (onde houver suporte).
+/// **Onde:** [`instalar_todos`].
+const FERRAMENTAS_DO_KIT: [&str; 3] = ["claude", "codex", "cursor"];
+
+/// **O quê:** instala o KIT COMPLETO — os apps da tabela [`EXTERNOS`] (CLI + janela de cada um),
+/// as ferramentas de IA ([`FERRAMENTAS_DO_KIT`]) e o próprio market com a janela dele — na última versão, pedindo UM consentimento (ou `-y`).
 /// Idempotente: o que já está na última (com janela) não é refeito; o que está velho atualiza.
 /// Cada item é independente: a falha de um não impede os outros; no fim vem o Resumo e, se algo
 /// falhou, o erro (exit != 0) com o que fazer.
@@ -54,6 +58,7 @@ fn conjunto_completo() -> Vec<&'static str> {
 /// **Onde:** [`install_cmd`] com `--all` — o que a dica do `update` numa máquina limpa manda rodar.
 fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
     let mut nomes = conjunto_completo();
+    nomes.extend(FERRAMENTAS_DO_KIT);
     nomes.push(MARKET);
     println!(
         "{}",
@@ -70,6 +75,22 @@ fn instalar_todos(dry_run: bool, yes: bool) -> Result<(), String> {
             Desfecho::Falhou(e)
         });
         itens.push((n.to_string(), d));
+    }
+    for slug in FERRAMENTAS_DO_KIT {
+        let d = match environments::instalar_ferramenta_no_kit(slug, dry_run) {
+            Ok(DesfechoFerramenta::Instalada) => Desfecho::Instalado,
+            Ok(DesfechoFerramenta::JaInstalada) => Desfecho::EmDia,
+            Ok(DesfechoFerramenta::NadaFeito) => Desfecho::NadaFeito,
+            Ok(DesfechoFerramenta::Pulada(motivo)) => {
+                eprintln!("{}", tf("install.all_skipped", &[("app", slug), ("reason", &motivo)]));
+                Desfecho::Pulado(motivo)
+            }
+            Err(e) => {
+                eprintln!("{}", tf("install.all_error", &[("app", slug), ("error", &e)]));
+                Desfecho::Falhou(e)
+            }
+        };
+        itens.push((slug.to_string(), d));
     }
     let d = instalar_market(dry_run).unwrap_or_else(|e| {
         eprintln!("{}", tf("install.all_error", &[("app", MARKET), ("error", &e)]));

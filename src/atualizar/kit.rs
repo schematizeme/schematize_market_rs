@@ -24,6 +24,9 @@ pub enum Desfecho {
     NaoConfirmado,
     /// `--dry-run` ou a pessoa não confirmou: nada foi tocado.
     NadaFeito,
+    /// Não se aplica a esta máquina (ex.: ferramenta sem build FreeBSD, falta Node.js). Não é
+    /// falha: o motivo acionável vem junto e o conjunto segue.
+    Pulado(String),
     /// Falhou. A causa vem junto (e já foi impressa quando aconteceu).
     Falhou(String),
 }
@@ -37,6 +40,7 @@ impl Desfecho {
             Desfecho::EmDia => "já em dia",
             Desfecho::NaoConfirmado => "não confirmado (nada alterado)",
             Desfecho::NadaFeito => "nada feito",
+            Desfecho::Pulado(_) => "pulado",
             Desfecho::Falhou(_) => "FALHOU",
         }
     }
@@ -49,17 +53,18 @@ pub fn resumo(itens: &[(String, Desfecho)]) -> String {
     let mut s = String::from("\nResumo:\n");
     for (nome, d) in itens {
         s.push_str(&format!("  {nome:<largura$}  {}\n", d.rotulo()));
-        if let Desfecho::Falhou(causa) = d {
+        if let Desfecho::Falhou(causa) | Desfecho::Pulado(causa) = d {
             let primeira = causa.lines().next().unwrap_or("").trim();
             s.push_str(&format!("  {:<largura$}    causa: {primeira}\n", ""));
         }
     }
     let conta = |f: fn(&Desfecho) -> bool| itens.iter().filter(|(_, d)| f(d)).count();
     s.push_str(&format!(
-        "  {} instalado(s), {} atualizado(s), {} já em dia, {} falha(s).\n",
+        "  {} instalado(s), {} atualizado(s), {} já em dia, {} pulado(s), {} falha(s).\n",
         conta(|d| *d == Desfecho::Instalado),
         conta(|d| *d == Desfecho::Atualizado),
         conta(|d| *d == Desfecho::EmDia),
+        conta(|d| matches!(d, Desfecho::Pulado(_))),
         conta(|d| matches!(d, Desfecho::Falhou(_))),
     ));
     s
@@ -140,11 +145,24 @@ mod tests {
             "já em dia",
             "FALHOU",
             "causa: sem rede",
-            "1 instalado(s), 1 atualizado(s), 1 já em dia, 1 falha(s)",
+            "1 instalado(s), 1 atualizado(s), 1 já em dia, 0 pulado(s), 1 falha(s)",
         ] {
             assert!(r.contains(esperado), "falta `{esperado}` em:\n{r}");
         }
         assert!(!r.contains("linha 2"), "só a 1ª linha da causa entra no resumo");
+    }
+
+    /// Item pulado (ferramenta sem suporte aqui) aparece no resumo com o motivo e NÃO é falha.
+    #[test]
+    fn pulado_aparece_com_motivo_e_nao_falha() {
+        let itens = [
+            item("claude", Desfecho::Pulado("Claude Code não tem build FreeBSD".into())),
+            item("cursor", Desfecho::Instalado),
+        ];
+        let r = resumo(&itens);
+        assert!(r.contains("pulado") && r.contains("causa: Claude Code não tem build"), "{r}");
+        assert!(r.contains("1 pulado(s)"), "{r}");
+        assert!(veredito(&itens).is_ok(), "pulado não derruba o conjunto");
     }
 
     /// Sem falha: `Ok`. Com falha: `Err` que nomeia SÓ os que falharam e diz como repetir.

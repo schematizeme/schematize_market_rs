@@ -246,7 +246,9 @@ mod tests {
         match defs::tool_install_recipe(codex, Family::Debian) {
             Recipe::Steps(s) => {
                 // note-step da dependência de node + o npm install.
-                assert!(s.iter().any(|st| st.cmd.contains("npm install -g @openai/codex")));
+                assert!(s.iter().any(|st| st
+                    .cmd
+                    .contains("npm install -g --prefix \"$HOME/.local\" @openai/codex")));
                 assert!(s.iter().any(|st| st.source == "nota"), "cita a dependência de Node.js");
             }
             _ => panic!("codex sempre tem Steps"),
@@ -269,35 +271,37 @@ mod tests {
         assert!(matches!(defs::tool_remove_recipe(code, Family::Unknown), Recipe::Na(_)));
         let codex = defs::find_tool("codex").unwrap();
         match defs::tool_remove_recipe(codex, Family::Fedora) {
-            Recipe::Steps(s) => assert!(s[0].cmd.contains("npm uninstall -g @openai/codex")),
+            Recipe::Steps(s) => assert!(s[0]
+                .cmd
+                .contains("npm uninstall -g --prefix \"$HOME/.local\" @openai/codex")),
             _ => panic!("codex remove tem Steps"),
         }
     }
 
-    /// O recipe do Codex agora roda com SUDO (conserta o EACCES no npm global do sistema):
-    /// o comando traz `sudo` literal E o selo de sudo está marcado (guardrail exibe [sudo]).
+    /// O Codex instala no prefixo do USUÁRIO (~/.local): sem sudo no comando, sem selo [sudo],
+    /// e o binário cai em ~/.local/bin (junto do claude e do cursor). Remoção idem.
     #[test]
-    fn codex_instala_com_sudo() {
+    fn codex_instala_sem_sudo_no_prefixo_do_usuario() {
         let codex = defs::find_tool("codex").unwrap();
         for fam in [Family::Debian, Family::Suse, Family::Fedora, Family::Arch, Family::Unknown] {
             match defs::tool_install_recipe(codex, fam) {
                 Recipe::Steps(s) => {
                     let npm = s
                         .iter()
-                        .find(|st| st.cmd.contains("npm install -g @openai/codex"))
+                        .find(|st| st.cmd.contains("npm install -g"))
                         .expect("passo de npm install do codex");
-                    assert!(npm.cmd.starts_with("sudo "), "sudo literal no comando: {}", npm.cmd);
-                    assert!(npm.sudo, "selo de sudo marcado (guardrail mostra [sudo])");
+                    assert!(!npm.cmd.contains("sudo"), "sem sudo no comando: {}", npm.cmd);
+                    assert!(npm.cmd.contains("--prefix \"$HOME/.local\""), "{}", npm.cmd);
+                    assert!(!npm.sudo, "sem selo de sudo");
                 }
                 _ => panic!("codex sempre tem Steps"),
             }
         }
-        // Remoção também com sudo (foi instalado como root).
         match defs::tool_remove_recipe(codex, Family::Debian) {
             Recipe::Steps(s) => {
-                assert!(s[0].cmd.starts_with("sudo "));
-                assert!(s[0].sudo);
-                assert!(s[0].cmd.contains("npm uninstall -g @openai/codex"));
+                assert!(!s[0].cmd.contains("sudo") && !s[0].sudo);
+                assert!(s[0].cmd.contains("--prefix \"$HOME/.local\""));
+                assert!(s[0].cmd.contains("npm uninstall -g"));
             }
             _ => panic!("codex remove tem Steps"),
         }

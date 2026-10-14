@@ -92,9 +92,26 @@ Se qualquer passo falhar, a troca **não acontece** e o binário antigo continua
 | | |
 |---|---|
 | **runtimes** | Go, Rust, Node, Python, Ruby, C#… por `docker`, `mise`, `distro` ou `official` |
-| **ferramentas de dev** | Claude Code, VS Code, Codex CLI |
+| **ferramentas de dev** | Claude Code, VS Code, Codex CLI, Cursor CLI (`cursor-agent`) |
+| **`install --all`** | os apps do ecossistema **e** as ferramentas de IA (`claude`, `codex`, `cursor`) onde houver suporte; o que não se aplica (ex.: FreeBSD, ou Codex sem Node.js) é pulado com o motivo, sem derrubar o resto |
 | **apps do ecossistema** | `schematize-deployer`, `schematize-optimizer` (compilados do fonte por ele mesmo) |
 | **o app e ele próprio** | `schematize`, `schematize-gui` e o `schematize-market` — via `update` |
+
+### Plataformas
+
+Linux (x86_64), macOS (arm64/x86_64), Windows (x86_64) e **FreeBSD (x86_64)**. No FreeBSD:
+
+- runtimes por `--method distro` (`pkg install -y`, com `sudo` ou `doas` — o que existir; sem
+  nenhum dos dois e sem ser root, o plano recusa dizendo o que fazer) e `official` para Rust.
+  `docker` e `mise` não são oferecidos. O .NET não tem pacote `pkg` confirmado e é recusado com
+  saída;
+- ferramentas de dev (Claude Code, VS Code, Codex, Cursor): **sem build FreeBSD** de nenhuma
+  delas — o market diz isso em vez de "instalar" algo que não executa;
+- o binário pronto `schematize-market-freebsd-x86_64` sai no release (cross-compilado e
+  executado numa VM FreeBSD antes de publicar). App sem asset FreeBSD cai no build do fonte.
+  O FreeBSD base não traz `curl`/`git`: o market usa o `fetch(1)` do base nos downloads quando
+  não há curl, e instala `curl` e `git` sozinho (via `pkg`, com sudo/doas) antes de compilar —
+  nenhum passo manual.
 
 **Uma lista só.** O pedido que originou este app foi *"deployer e optimizer deveriam aparecer
 no env para instalar"*. A leitura rasa seria somar os apps à tabela do `env`. A leitura certa

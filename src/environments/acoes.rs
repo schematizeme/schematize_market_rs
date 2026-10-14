@@ -171,6 +171,53 @@ pub(crate) fn install_tool(
     Ok(())
 }
 
+/// O que aconteceu com uma ferramenta no `install --all`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DesfechoFerramenta {
+    /// Instalada agora.
+    Instalada,
+    /// O binário já estava no PATH: nada a fazer.
+    JaInstalada,
+    /// Não se aplica a esta máquina (sem build, falta Node/npm…). Motivo acionável.
+    Pulada(String),
+    /// `--dry-run`: o plano foi mostrado e nada foi executado.
+    NadaFeito,
+}
+
+/// **O quê:** instala UMA ferramenta dentro do `install --all` — sem perguntar de novo (o
+/// consentimento do conjunto já foi dado) e SEM nunca derrubar o conjunto por "não se aplica":
+/// FreeBSD (Na), Node/npm ausente (codex) e receita sem passos viram [`DesfechoFerramenta::Pulada`]
+/// com o motivo. Só falha real de execução volta como `Err`.
+/// **Onde:** `cli::instalar::instalar_todos`.
+pub fn instalar_ferramenta_no_kit(slug: &str, dry_run: bool) -> Result<DesfechoFerramenta, String> {
+    let tool = defs::find_tool(slug).ok_or_else(|| tf("env.unknown_lang", &[("lang", slug)]))?;
+    if detect::has_bin(tool.bin) {
+        println!("{}", tf("env.tool_already", &[("tool", tool.display)]));
+        return Ok(DesfechoFerramenta::JaInstalada);
+    }
+    let m = Machine::probe();
+    let steps = match defs::tool_install_recipe(tool, m.family) {
+        Recipe::Steps(s) => s,
+        Recipe::Todo(note) | Recipe::Na(note) => return Ok(DesfechoFerramenta::Pulada(note)),
+    };
+    if tool.slug == "codex" && !detect::has_bin("npm") {
+        return Ok(DesfechoFerramenta::Pulada(tf("env.skip_needs_npm", &[("tool", tool.display)])));
+    }
+    print_tool_plan(tool, &steps);
+    match run_steps(&steps, dry_run, true, exec_step)? {
+        PlanAction::Executed => {
+            println!("{}", tf("env.tool_done", &[("tool", tool.display)]));
+            ensure_tool_ready(tool);
+            Ok(DesfechoFerramenta::Instalada)
+        }
+        PlanAction::DryRun => {
+            println!("{}", t("env.dry_run"));
+            Ok(DesfechoFerramenta::NadaFeito)
+        }
+        PlanAction::Aborted => Ok(DesfechoFerramenta::NadaFeito),
+    }
+}
+
 /// `schematize env remove <tool>` — desfaz o caminho canônico (por família no VS Code).
 pub(crate) fn remove_tool(
     tool: &Tool,

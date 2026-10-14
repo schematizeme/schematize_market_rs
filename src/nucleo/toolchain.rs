@@ -41,15 +41,17 @@ pub fn ensure_toolchain() -> Result<PathBuf, String> {
     if cargo_abs.is_file() {
         return Ok(cargo_abs);
     }
+    // FreeBSD: o base não traz curl nem git. Instala os dois ANTES de qualquer download/clone
+    // (best-effort: sem escalador o rustup ainda baixa por `fetch`, que o base tem).
+    if plataforma::os() == Os::FreeBsd {
+        preparar_freebsd();
+    }
     println!("→ instalando Rust (rustup, perfil mínimo)…");
     match plataforma::os() {
         Os::Windows => instalar_rustup_windows()?,
         _ => {
             // Unix: o instalador oficial, não interativo, perfil mínimo.
-            util::run_inherit(
-                "sh",
-                &["-c", "curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal"],
-            )?;
+            util::run_inherit("sh", &["-c", &comando_rustup(super::rede::cliente())])?;
         }
     }
     if cargo_abs.is_file() {
@@ -61,6 +63,37 @@ pub fn ensure_toolchain() -> Result<PathBuf, String> {
             .into())
     }
 }
+
+/// **O quê:** o `… | sh` do rustup com o cliente HTTP disponível (`curl` ou, no FreeBSD sem
+/// curl, `fetch -o -`). PURA. **Onde:** [`ensure_toolchain`] e os testes.
+fn comando_rustup(cli: super::rede::Cliente) -> String {
+    format!(
+        "{} | sh -s -- -y --profile minimal",
+        super::rede::baixar_para_pipe(cli, "https://sh.rustup.rs")
+    )
+}
+
+/// **O quê:** no FreeBSD, instala `curl` e `git` (via `pkg`, com sudo/doas se preciso) quando
+/// faltam, sem a pessoa precisar saber. Best-effort: falha é dita e o fluxo segue.
+/// **Onde:** [`ensure_toolchain`], primeiro passo de todo build do fonte.
+#[cfg(not(windows))]
+fn preparar_freebsd() {
+    let faltam: Vec<&str> =
+        ["curl", "git"].into_iter().filter(|b| !super::bin::binary_in_path(b)).collect();
+    if faltam.is_empty() {
+        return;
+    }
+    println!("→ instalando {} (pkg)…", faltam.join(" e "));
+    let mut args = vec!["pkg", "install", "-y"];
+    args.extend(faltam);
+    if let Err(e) = pkg_install(&args) {
+        eprintln!("aviso: não consegui instalar curl/git via pkg ({e}); sigo com o que há.");
+    }
+}
+
+/// No-op fora de Unix (o FreeBSD não existe no Windows).
+#[cfg(windows)]
+fn preparar_freebsd() {}
 
 /// **O quê:** baixa e roda o `rustup-init.exe`. **Onde:** [`ensure_toolchain`] no Windows.
 fn instalar_rustup_windows() -> Result<(), String> {
@@ -433,6 +466,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// O bootstrap do rustup usa curl quando há, e `fetch -o -` no FreeBSD sem curl.
+    #[test]
+    fn rustup_escolhe_curl_ou_fetch() {
+        use super::super::rede::{escolher_cliente, Cliente};
+        let com = comando_rustup(escolher_cliente(true, true));
+        let sem = comando_rustup(escolher_cliente(true, false));
+        assert!(com.starts_with("curl ") && com.contains("| sh -s -- -y"), "{com}");
+        assert_eq!(sem, "fetch -o - https://sh.rustup.rs | sh -s -- -y --profile minimal");
+        assert_eq!(comando_rustup(Cliente::Curl), com);
     }
 
     /// FreeBSD: a lista começa por `pkg`, traz curl e cobre as libs que o Slint linka.

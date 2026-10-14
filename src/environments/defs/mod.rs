@@ -450,7 +450,13 @@ fn official_install(env: &Env) -> Recipe {
         }
         "rust" => {
             steps.push(step(
-                "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y",
+                &format!(
+                    "{} | sh -s -- -y",
+                    crate::nucleo::rede::baixar_para_pipe(
+                        crate::nucleo::rede::cliente(),
+                        "https://sh.rustup.rs"
+                    )
+                ),
                 "https://sh.rustup.rs (rustup oficial)",
                 false,
                 true,
@@ -639,20 +645,22 @@ pub fn tool_install_recipe(tool: &Tool, fam: Family) -> Recipe {
                 "família da distro não detectada — VS Code precisa de apt (.deb) ou dnf/zypper (rpm).".into(),
             ),
         },
-        // Codex CLI via npm global (depende de Node.js/npm — cita a dependência).
-        // DECISÃO: rodamos o `npm install -g` com SUDO. O npm global do sistema (o
-        // instalado pela distro, em /usr/local/lib/node_modules) pertence ao root, então
-        // sem sudo o install dá EACCES (permission denied). Escolhemos sudo por ser o
-        // caminho mais simples e confiável — o guardrail já exibe o selo [sudo] e o `sudo`
-        // literal no comando faz o SO pedir a senha. (Alternativa descartada: configurar um
-        // prefixo de npm no usuário — `npm config set prefix ~/.npm-global` + PATH — resolve
-        // sem root, mas exige mexer no PATH do usuário e é mais frágil por máquina.)
+        // Codex CLI via npm, com PREFIXO NO HOME — sem sudo, e o binário cai em ~/.local/bin,
+        // o mesmo diretório do claude e do cursor (que o `ensure_tool_ready` já põe no PATH).
+        //
+        // HISTÓRICO: antes rodava `sudo npm install -g` porque o prefixo global do npm da
+        // distro (/usr/local/lib/node_modules) é do root e sem sudo dá EACCES. O único
+        // argumento contra o prefixo de usuário era "mexer no PATH e ser frágil por máquina" —
+        // não é bloqueio: `--prefix "$HOME/.local"` não toca em configuração do npm, e
+        // ~/.local/bin já é tratado pelo market. Com isso o `install --all` não depende de
+        // senha de sudo. (Instalações antigas sob /usr/local seguem valendo: o bin já está no
+        // PATH e a instalação é dada como feita.)
         "codex" => Recipe::Steps(vec![
             note_step("requer Node.js/npm no PATH (instale antes: `schematize env install node`)."),
             step(
-                "sudo npm install -g @openai/codex",
+                "npm install -g --prefix \"$HOME/.local\" @openai/codex",
                 "npmjs.com (@openai/codex)",
-                true,
+                false,
                 false,
             ),
         ]),
@@ -703,11 +711,11 @@ pub fn tool_remove_recipe(tool: &Tool, fam: Family) -> Recipe {
                 Recipe::Na("família da distro não detectada.".into())
             }
         },
-        // Instalado como root (sudo npm -g) → remover também exige sudo (senão EACCES).
+        // Instalado no prefixo do usuário (~/.local) -> remover também sem sudo.
         "codex" => Recipe::Steps(vec![step(
-            "sudo npm uninstall -g @openai/codex",
+            "npm uninstall -g --prefix \"$HOME/.local\" @openai/codex",
             "npmjs.com (@openai/codex)",
-            true,
+            false,
             false,
         )]),
         // Cursor: o instalador só cria ~/.local/share/cursor-agent e os links `agent` e
