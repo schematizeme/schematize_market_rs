@@ -13,7 +13,6 @@ use crate::environments::{Machine, Method};
 use crate::nucleo::{toolchain, util};
 use crate::receitas::Receitas;
 use schematize_plataforma::seams::rede::{cliente, Cliente};
-use schematize_plataforma::seams::shell::login_shell;
 use schematize_plataforma::seams::Plataforma;
 use std::path::PathBuf;
 
@@ -58,21 +57,15 @@ impl Receitas for ReceitasUnix {
         crate::environments::razao_unix(m, method)
     }
 
-    /// **O quê:** roda o passo em `<shell de login> -lc`, herdando stdin/stdout/stderr (a
-    /// saída aparece ao vivo e o `sudo` consegue pedir a senha). Nota é no-op.
-    /// **Onde:** `run_steps` das ações de instalar/remover.
-    ///
-    /// **Por que não `plat.shell.run`:** a costura captura a saída e fecha o stdin, o que
-    /// calaria o progresso e quebraria o prompt do `sudo` — o oposto do consentimento honesto.
-    fn exec_step(&self, _plat: &Plataforma, s: &Step) -> Result<(), String> {
+    /// **O quê:** roda o passo pela costura `plat.shell.run_herdado` (`<shell de login> -lc`
+    /// herdando stdin/stdout/stderr: saída ao vivo e o `sudo` consegue pedir a senha). Nota é
+    /// no-op. **Onde:** `run_steps` das ações de instalar/remover.
+    fn exec_step(&self, plat: &Plataforma, s: &Step) -> Result<(), String> {
         if s.source == "nota" {
             return Ok(());
         }
-        let status = std::process::Command::new(login_shell())
-            .arg("-lc")
-            .arg(&s.cmd)
-            .status()
-            .map_err(|e| format!("falha ao executar shell: {e}"))?;
+        let status =
+            plat.shell.run_herdado(&s.cmd).map_err(|e| format!("falha ao executar shell: {e}"))?;
         if status.success() {
             Ok(())
         } else {

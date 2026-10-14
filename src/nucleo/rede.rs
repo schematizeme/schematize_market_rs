@@ -48,9 +48,10 @@ pub fn get_text_com_cabecalho(ctx: &Ctx, url: &str, cabecalho: &str) -> Option<S
 ///
 /// **Por que devolve `bool` e não `Result`:** o chamador não trata as causas de forma
 /// diferente — asset ausente (404), rede fora e disco cheio levam todos ao mesmo lugar:
-/// compilar do fonte. A causa, porém, NÃO se perde: vai para o stderr (piso 4).
+/// compilar do fonte. A causa, porém, NÃO se perde: vai para o stderr (piso 4). Com stderr num
+/// terminal a barra de progresso do cliente aparece (`baixar_com_progresso`).
 pub fn download(ctx: &Ctx, url: &str, dest: &Path) -> bool {
-    match ctx.plat.rede.baixar(url, dest) {
+    match ctx.plat.rede.baixar_com_progresso(url, dest, true) {
         Ok(()) => dest.is_file(),
         Err(e) => {
             eprintln!("aviso: {e}");
