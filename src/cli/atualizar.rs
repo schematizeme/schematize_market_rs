@@ -18,7 +18,12 @@ use market::nucleo::plataforma;
 /// **O quê:** `schematize-market update [--force] [--dry-run]`.
 /// **Onde:** o despacho do `main`.
 pub(crate) fn update_cmd(force: bool, dry_run: bool) -> Result<(), String> {
-    atualizar::install_or_update(force, dry_run)
+    let r = atualizar::install_or_update(force, dry_run);
+    // A janela do market acompanha todo update (best-effort: só avisa se não der).
+    if !dry_run {
+        atualizar::selfupdate::garantir_janela_do_market();
+    }
+    r
 }
 
 /// **O quê:** `schematize-market pin <versão>` — e `pin latest` DESAFIXA.

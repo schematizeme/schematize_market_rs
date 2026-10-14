@@ -131,6 +131,48 @@ pub fn instalar_janela_do_market(versao: &str) -> Result<(), String> {
     instalar_janela_com(&super::release::RedeReal, &asset, versao, &destino)
 }
 
+/// **O quê:** garante a janela do market em `destino`: já existe -> `Ok(false)` sem rede;
+/// falta -> baixa a da versão publicada e `Ok(true)`. `publicada` é a última versão (ou a causa
+/// de não saber). **Onde:** [`garantir_janela_do_market`] e a suíte.
+pub fn garantir_janela_com<R: super::release::Rede>(
+    rede: &R,
+    asset: &str,
+    publicada: Result<&str, &str>,
+    destino: &Path,
+) -> Result<bool, String> {
+    if destino.is_file() {
+        return Ok(false);
+    }
+    let v = publicada.map_err(|c| format!("não sei qual versão da janela baixar ({c})"))?;
+    instalar_janela_com(rede, asset, v, destino).map(|()| true)
+}
+
+/// **O quê:** toda instalação/atualização deixa a `schematize-market-gui` presente. NUNCA falha
+/// quem chama: o problema vira UMA linha de aviso com a causa. **Onde:** `install <qualquer
+/// coisa>` e `update` (`cli/`). Sem efeito em `--dry-run` (quem chama não invoca).
+pub fn garantir_janela_do_market() {
+    let Some(asset) = plataforma::gestor_gui_asset_name() else { return };
+    let destino = plataforma::install_dir().join(plataforma::gestor_gui_bin());
+    if destino.is_file() {
+        return;
+    }
+    let publicada = match super::alvo::alvo_de(plataforma::MARKET_REPO) {
+        super::alvo::Alvo::Versao(v) | super::alvo::Alvo::SemAsset { versao: v } => Ok(v),
+        super::alvo::Alvo::Indisponivel(e) => Err(e),
+    };
+    let r = garantir_janela_com(
+        &super::release::RedeReal,
+        &asset,
+        publicada.as_deref().map_err(String::as_str),
+        &destino,
+    );
+    match r {
+        Ok(true) => println!("✓ {} (janela do market)", plataforma::gestor_gui_bin()),
+        Ok(false) => {}
+        Err(e) => println!("aviso: a janela do market não foi instalada: {e}"),
+    }
+}
+
 /// **O quê:** [`instalar_janela_do_market`] sem derrubar quem chama: o CLI JÁ foi trocado, então
 /// falhar aqui vira aviso DITO com a causa e como repetir (nunca silêncio). **Onde:** o fim do
 /// self-update.
@@ -539,5 +581,35 @@ mod tests {
             assert_eq!(std::fs::read(&dst).unwrap(), b"antiga");
             let _ = std::fs::remove_dir_all(&d);
         }
+    }
+
+    /// **"O market com gui vem com qualquer programa":** sem a janela, garantir baixa a do
+    /// release; com ela, não toca na rede; sem versão publicada, erro dito (o chamador só avisa).
+    #[test]
+    fn garantir_janela_traz_a_gui_e_e_idempotente() {
+        let (d, _) = sandbox("garantir");
+        let dst = d.join("schematize-market-gui");
+        let r = RedeJanela { entrega: true, corpo: b"j", pediu: Default::default() };
+        let a = "schematize-market-gui-linux-x86_64";
+        assert_eq!(garantir_janela_com(&r, a, Ok("0.4.6"), &dst), Ok(true));
+        assert!(dst.is_file());
+        assert_eq!(garantir_janela_com(&r, a, Ok("0.4.6"), &dst), Ok(false));
+        assert_eq!(r.pediu.borrow().len(), 1, "2ª vez não baixa");
+        std::fs::remove_file(&dst).unwrap();
+        let e = garantir_janela_com(&r, a, Err("sem rede"), &dst).unwrap_err();
+        assert!(e.contains("sem rede"), "{e}");
+        let ruim = RedeJanela { entrega: false, corpo: b"", pediu: Default::default() };
+        assert!(garantir_janela_com(&ruim, a, Ok("0.4.6"), &dst).is_err());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// `install <app>` e `update` chamam o garantir (e só depois de sucesso/sem dry-run).
+    #[test]
+    fn install_e_update_chamam_garantir_janela() {
+        let i = include_str!("../cli/instalar.rs");
+        let i = i.split("#[cfg(test)]").next().unwrap();
+        assert!(i.contains("garantir_janela_do_market()"));
+        let u = include_str!("../cli/atualizar.rs");
+        assert!(u.contains("garantir_janela_do_market()"));
     }
 }

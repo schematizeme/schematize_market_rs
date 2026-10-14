@@ -12,6 +12,7 @@
 use market::appsdacasa::{externo, instalar_app_da_casa, registrar_no_menu, EXTERNOS};
 use market::atualizar::instalacao::Resultado;
 use market::atualizar::kit::{self, AcaoMarket, Desfecho};
+use market::atualizar::selfupdate;
 use market::environments;
 use market::nucleo::i18n::{t, tf};
 
@@ -25,12 +26,17 @@ pub(crate) fn install_cmd(
     dry_run: bool,
     yes: bool,
 ) -> Result<(), String> {
-    match (what, all) {
+    let r = match (what, all) {
         (_, true) => instalar_todos(dry_run, yes),
         (Some(w), false) if externo(w).is_some() => instalar_app(w, dry_run, yes).map(|_| ()),
         (Some(w), false) => environments::install(w, method, dry_run, yes),
         (None, false) => Err(t("install.what_missing")),
+    };
+    // O market com janela vem com QUALQUER coisa instalada; falhar aqui só avisa (uma linha).
+    if r.is_ok() && !dry_run && !all {
+        selfupdate::garantir_janela_do_market();
     }
+    r
 }
 
 /// **O quê:** os binários do conjunto `--all` — os apps da tabela [`EXTERNOS`].
@@ -81,7 +87,7 @@ const MARKET: &str = "schematize-market";
 /// versão nova (que já traz a janela), ou só a janela quando o CLI está em dia e ela falta.
 /// **Onde:** [`instalar_todos`], depois dos apps.
 fn instalar_market(dry_run: bool) -> Result<Desfecho, String> {
-    use market::atualizar::{alvo, selfupdate, APPS_GERIDOS};
+    use market::atualizar::{alvo, APPS_GERIDOS};
     let app = APPS_GERIDOS
         .iter()
         .find(|a| a.bin == MARKET)
