@@ -46,7 +46,7 @@
   "env.unknown_lang": "بيئة غير معروفة: {lang} (جرّب: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "خطأ في {app}: {error}",
   "install.all_failed": "تعذّر التثبيت: {apps}",
-  "install.all_intro": "سأثبّت تطبيقات المنظومة الـ {n}: {apps}",
+  "install.all_intro": "سأثبّت {n} عناصر (تطبيقات المنظومة وأدوات الذكاء الاصطناعي claude وcodex وcursor حيثما كانت مدعومة): {apps}",
   "install.all_skipped": "تم تخطي {app}: {reason}",
   "install.cancelled": "أُلغي — لم يُنفَّذ شيء.",
   "install.what_missing": "حدّد ما تريد تثبيته (مثل `install go`) أو استخدم `--all`",

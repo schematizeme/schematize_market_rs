@@ -46,7 +46,7 @@
   "env.unknown_lang": "bilinmeyen ortam: {lang} (deneyin: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "{app} içinde hata: {error}",
   "install.all_failed": "kurulamadı: {apps}",
-  "install.all_intro": "Ekosistemin {n} uygulamasını kuracağım: {apps}",
+  "install.all_intro": "{n} öğe kuracağım (ekosistem uygulamaları ve desteklenen yerlerde yapay zekâ araçları claude, codex, cursor): {apps}",
   "install.all_skipped": "{app} atlandı: {reason}",
   "install.cancelled": "iptal edildi — hiçbir şey yapılmadı.",
   "install.what_missing": "neyin kurulacağını belirtin (örn. `install go`) ya da `--all` kullanın",

@@ -46,7 +46,7 @@
   "env.unknown_lang": "môi trường không xác định: {lang} (thử: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "lỗi ở {app}: {error}",
   "install.all_failed": "không cài được: {apps}",
-  "install.all_intro": "Tôi sẽ cài {n} ứng dụng của hệ sinh thái: {apps}",
+  "install.all_intro": "Tôi sẽ cài {n} mục (ứng dụng của hệ sinh thái và công cụ AI claude, codex, cursor nơi được hỗ trợ): {apps}",
   "install.all_skipped": "Đã bỏ qua {app}: {reason}",
   "install.cancelled": "đã hủy — chưa làm gì cả.",
   "install.what_missing": "hãy nói cần cài gì (vd. `install go`) hoặc dùng `--all`",

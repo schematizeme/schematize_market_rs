@@ -46,7 +46,7 @@
   "env.unknown_lang": "未知环境：{lang}（可用：go, rust, elixir, csharp, zig, ruby, node）",
   "install.all_error": "{app} 出错：{error}",
   "install.all_failed": "无法安装：{apps}",
-  "install.all_intro": "我将安装生态系统的 {n} 个应用：{apps}",
+  "install.all_intro": "我将安装 {n} 项（生态系统应用，以及在支持的平台上的 AI 工具 claude、codex、cursor）：{apps}",
   "install.all_skipped": "已跳过 {app}：{reason}",
   "install.cancelled": "已取消 — 未做任何更改。",
   "install.what_missing": "请指明要安装什么（例如 `install go`），或使用 `--all`",

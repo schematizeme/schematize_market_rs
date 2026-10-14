@@ -46,7 +46,7 @@
   "env.unknown_lang": "lingkungan tidak dikenal: {lang} (coba: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "galat pada {app}: {error}",
   "install.all_failed": "gagal memasang: {apps}",
-  "install.all_intro": "Saya akan memasang {n} aplikasi ekosistem: {apps}",
+  "install.all_intro": "Saya akan memasang {n} item (aplikasi ekosistem dan alat AI claude, codex, cursor di tempat yang didukung): {apps}",
   "install.all_skipped": "{app} dilewati: {reason}",
   "install.cancelled": "dibatalkan — tidak ada yang dilakukan.",
   "install.what_missing": "sebutkan apa yang akan dipasang (mis. `install go`) atau gunakan `--all`",

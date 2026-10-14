@@ -46,7 +46,7 @@
   "env.unknown_lang": "محیط ناشناخته: {lang} (امتحان کنید: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "خطا در {app}: {error}",
   "install.all_failed": "نصب نشد: {apps}",
-  "install.all_intro": "{n} برنامهٔ اکوسیستم را نصب می‌کنم: {apps}",
+  "install.all_intro": "{n} مورد را نصب می‌کنم (برنامه‌های اکوسیستم و ابزارهای هوش مصنوعی claude، codex و cursor در جاهایی که پشتیبانی می‌شوند): {apps}",
   "install.all_skipped": "{app} رد شد: {reason}",
   "install.cancelled": "لغو شد — کاری انجام نشد.",
   "install.what_missing": "بگویید چه چیزی نصب شود (مثلاً `install go`) یا از `--all` استفاده کنید",

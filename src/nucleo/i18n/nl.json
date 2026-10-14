@@ -46,7 +46,7 @@
   "env.unknown_lang": "onbekende omgeving: {lang} (probeer: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "fout bij {app}: {error}",
   "install.all_failed": "installeren mislukt: {apps}",
-  "install.all_intro": "Ik installeer de {n} apps van het ecosysteem: {apps}",
+  "install.all_intro": "Ik installeer {n} onderdelen (apps van het ecosysteem en de AI-tools claude, codex, cursor waar ondersteund): {apps}",
   "install.all_skipped": "{app} overgeslagen: {reason}",
   "install.cancelled": "geannuleerd — er is niets gedaan.",
   "install.what_missing": "zeg wat je wilt installeren (bijv. `install go`) of gebruik `--all`",

@@ -46,7 +46,7 @@
   "env.unknown_lang": "ไม่รู้จักสภาพแวดล้อม: {lang} (ลอง: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "ข้อผิดพลาดที่ {app}: {error}",
   "install.all_failed": "ติดตั้งไม่สำเร็จ: {apps}",
-  "install.all_intro": "ฉันจะติดตั้งแอปของระบบนิเวศทั้ง {n} ตัว: {apps}",
+  "install.all_intro": "ฉันจะติดตั้ง {n} รายการ (แอปของระบบนิเวศ และเครื่องมือ AI อย่าง claude, codex, cursor ในที่ที่รองรับ): {apps}",
   "install.all_skipped": "ข้าม {app}: {reason}",
   "install.cancelled": "ยกเลิกแล้ว — ยังไม่ได้ทำอะไร",
   "install.what_missing": "ระบุสิ่งที่จะติดตั้ง (เช่น `install go`) หรือใช้ `--all`",

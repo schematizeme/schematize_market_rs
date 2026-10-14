@@ -46,7 +46,7 @@
   "env.unknown_lang": "अज्ञात एनवायरनमेंट: {lang} (आज़माएँ: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "{app} में त्रुटि: {error}",
   "install.all_failed": "इंस्टॉल नहीं हो सका: {apps}",
-  "install.all_intro": "मैं इकोसिस्टम के {n} ऐप इंस्टॉल करूँगा: {apps}",
+  "install.all_intro": "मैं {n} आइटम इंस्टॉल करूँगा (इकोसिस्टम ऐप और, जहाँ समर्थित हो, AI टूल claude, codex, cursor): {apps}",
   "install.all_skipped": "{app} छोड़ा गया: {reason}",
   "install.cancelled": "रद्द — कुछ नहीं किया गया।",
   "install.what_missing": "बताइए क्या इंस्टॉल करना है (जैसे `install go`) या `--all` इस्तेमाल करें",

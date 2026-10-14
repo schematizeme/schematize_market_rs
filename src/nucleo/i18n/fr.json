@@ -46,7 +46,7 @@
   "env.unknown_lang": "environnement inconnu : {lang} (essayez : go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "erreur dans {app} : {error}",
   "install.all_failed": "installation impossible : {apps}",
-  "install.all_intro": "Je vais installer les {n} applications de l'écosystème : {apps}",
+  "install.all_intro": "Je vais installer {n} éléments (applications de l'écosystème et outils IA claude, codex, cursor là où c'est pris en charge) : {apps}",
   "install.all_skipped": "{app} ignoré : {reason}",
   "install.cancelled": "annulé — rien n'a été fait.",
   "install.what_missing": "indiquez quoi installer (ex. `install go`) ou utilisez `--all`",

@@ -46,7 +46,7 @@
   "env.unknown_lang": "不明な環境: {lang}（go, rust, elixir, csharp, zig, ruby, node のいずれか）",
   "install.all_error": "{app} でエラー: {error}",
   "install.all_failed": "インストールできませんでした: {apps}",
-  "install.all_intro": "エコシステムの {n} 個のアプリをインストールします: {apps}",
+  "install.all_intro": "{n} 個の項目をインストールします (エコシステムのアプリと、対応環境では AI ツールの claude、codex、cursor): {apps}",
   "install.all_skipped": "{app} をスキップ: {reason}",
   "install.cancelled": "キャンセルしました — 何も行っていません。",
   "install.what_missing": "インストールする対象を指定してください（例: `install go`）、または `--all` を使ってください",

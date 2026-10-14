@@ -46,7 +46,7 @@
   "env.unknown_lang": "অজানা পরিবেশ: {lang} (চেষ্টা করুন: go, rust, elixir, csharp, zig, ruby, node)",
   "install.all_error": "{app}-এ ত্রুটি: {error}",
   "install.all_failed": "ইনস্টল করা যায়নি: {apps}",
-  "install.all_intro": "আমি ইকোসিস্টেমের {n}টি অ্যাপ ইনস্টল করব: {apps}",
+  "install.all_intro": "আমি {n}টি আইটেম ইনস্টল করব (ইকোসিস্টেমের অ্যাপ এবং সমর্থিত জায়গায় AI টুল claude, codex, cursor): {apps}",
   "install.all_skipped": "{app} এড়ানো হয়েছে: {reason}",
   "install.cancelled": "বাতিল — কিছুই করা হয়নি।",
   "install.what_missing": "কী ইনস্টল করবেন বলুন (যেমন `install go`) অথবা `--all` ব্যবহার করুন",
